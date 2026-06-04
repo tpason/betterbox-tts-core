@@ -1,0 +1,322 @@
+name: betterbox-tts
+
+x-pipeline-env: &pipeline-env
+  STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
+  PYTHONUNBUFFERED: "1"
+
+x-host-gateway: &host-gateway
+  - "host.docker.internal:host-gateway"
+
+# Healthcheck dùng chung: ping DB để xác nhận worker còn kết nối được.
+x-db-healthcheck: &db-healthcheck
+  test: ["CMD", "python", "-c",
+    "import os, psycopg; conn = psycopg.connect(os.environ['STORY_DATABASE_URL']); conn.execute('SELECT 1'); conn.close()"]
+  interval: 60s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+# Logging rotation cho tất cả service (tránh disk full sau thời gian dài chạy).
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+  story-db-migrate:
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    restart: "no"
+    environment:
+      <<: *pipeline-env
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    logging: *default-logging
+    command: ["sh", "docker/scripts/run-db-migrations.sh"]
+
+  story-reader:
+    build:
+      context: story_reader
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
+      PORT: ${STORY_READER_PORT:-3000}
+      HOSTNAME: 0.0.0.0
+      NODE_ENV: production
+      READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
+      NEXT_PUBLIC_READER_WS_URL: ${NEXT_PUBLIC_READER_WS_URL:-}
+      AUDIO_API_BLOCKING_JOB_TYPES: ${AUDIO_API_BLOCKING_JOB_TYPES:-audio_chapter_segments,audio_chapter,polish_chapter}
+      AUDIO_API_MAX_RUNNING_JOBS: ${AUDIO_API_MAX_RUNNING_JOBS:-1}
+      AUDIO_API_MAX_QUEUED_JOBS: ${AUDIO_API_MAX_QUEUED_JOBS:-1}
+      AUDIO_API_MIN_FREE_RAM_GB: ${AUDIO_API_MIN_FREE_RAM_GB:-1.5}
+      AUDIO_API_MAX_LOAD_PER_CPU: ${AUDIO_API_MAX_LOAD_PER_CPU:-0.9}
+      AUDIO_API_MIN_FREE_VRAM_GB: ${AUDIO_API_MIN_FREE_VRAM_GB:-0}
+    extra_hosts: *host-gateway
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:' + (process.env.PORT || '3000') + '/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "${STORY_READER_PORT:-3000}:${STORY_READER_PORT:-3000}"
+
+  story-discovery-scheduler:
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *pipeline-env
+      DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-86400}
+      DISCOVERY_SOURCES: ${DISCOVERY_SOURCES:-truyenfull_today royalroad}
+      DISCOVERY_PAGES: ${DISCOVERY_PAGES:-2}
+      DISCOVERY_MIN_CHAPTERS: ${DISCOVERY_MIN_CHAPTERS:-30}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    logging: *default-logging
+    healthcheck: *db-healthcheck
+    command: ["sh", "docker/scripts/run-story-discovery.sh"]
+
+  # Each replica independently claims stories from DB and crawls in parallel.
+  # The DB claim mechanism prevents double-crawling between replicas.
+  # Scale up: CRAWLER_REPLICAS=3 in .env, then docker compose up -d
+  story-crawler-scheduler:
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *pipeline-env
+      CRAWLER_INTERVAL_SECONDS: ${CRAWLER_INTERVAL_SECONDS:-300}
+      CRAWLER_SOURCES: ${CRAWLER_SOURCES:-truyenfull_today truyenyy docln sttruyen truyenchuhay truyenhoangdung wattpad_vn royalroad lightnovelpub novelbin freewebnovel novelhub}
+      # Max threads per container; check_resources.py scales this down when system is busy.
+      CRAWLER_WORKERS: ${CRAWLER_WORKERS:-4}
+      CRAWLER_MIN_FREE_RAM_GB: ${CRAWLER_MIN_FREE_RAM_GB:-1.0}
+      CRAWLER_MAX_CPU_PERCENT: ${CRAWLER_MAX_CPU_PERCENT:-85}
+      CRAWLER_ONLY_INCOMPLETE: ${CRAWLER_ONLY_INCOMPLETE:-1}
+      CRAWLER_MIN_CATALOG_CHECK_HOURS: ${CRAWLER_MIN_CATALOG_CHECK_HOURS:-1}
+      CRAWLER_CLAIM_COOLDOWN_MINUTES: ${CRAWLER_CLAIM_COOLDOWN_MINUTES:-60}
+      CRAWLER_LIMIT_STORIES: ${CRAWLER_LIMIT_STORIES:-0}
+      CRAWLER_MAX_CHAPTERS: ${CRAWLER_MAX_CHAPTERS:-0}
+      CRAWLER_TIMEOUT: ${CRAWLER_TIMEOUT:-30}
+      CRAWLER_RETRIES: ${CRAWLER_RETRIES:-5}
+      CRAWLER_RETRY_SLEEP: ${CRAWLER_RETRY_SLEEP:-2.0}
+      CRAWLER_CHAPTER_DELAY: ${CRAWLER_CHAPTER_DELAY:-1.5}
+      CRAWLER_CHAPTER_WORKERS: ${CRAWLER_CHAPTER_WORKERS:-2}
+      CRAWLER_MAX_CONSECUTIVE_CONTENT_MISSES: ${CRAWLER_MAX_CONSECUTIVE_CONTENT_MISSES:-1}
+      CRAWLER_POST_TRANSLATE: ${CRAWLER_POST_TRANSLATE:-polish}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    logging: *default-logging
+    healthcheck: *db-healthcheck
+    command: ["sh", "docker/scripts/run-crawler-scheduler.sh"]
+    deploy:
+      replicas: ${CRAWLER_REPLICAS:-1}
+
+  # Finds a source B for incomplete source-A stories, then merges new chapters
+  # into the same story_id. Defaults to dry-run; set ALTERNATE_APPLY=1 to import.
+  story-alternate-scheduler:
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *pipeline-env
+      ALTERNATE_INTERVAL_SECONDS: ${ALTERNATE_INTERVAL_SECONDS:-21600}
+      ALTERNATE_TARGET_SOURCES: ${ALTERNATE_TARGET_SOURCES:-truyenfull_today truyenyy docln sttruyen truyenchuhay truyenhoangdung wattpad_vn}
+      ALTERNATE_PROVIDERS: ${ALTERNATE_PROVIDERS:-lightnovelpub royalroad}
+      ALTERNATE_ALIAS_JSON: ${ALTERNATE_ALIAS_JSON:-}
+      ALTERNATE_LIMIT_STORIES: ${ALTERNATE_LIMIT_STORIES:-20}
+      ALTERNATE_MIN_SCORE: ${ALTERNATE_MIN_SCORE:-0.72}
+      ALTERNATE_MAX_CANDIDATES: ${ALTERNATE_MAX_CANDIDATES:-5}
+      ALTERNATE_RESUME_FROM: ${ALTERNATE_RESUME_FROM:-polished}
+      ALTERNATE_APPLY: ${ALTERNATE_APPLY:-0}
+      ALTERNATE_POLISH_INLINE: ${ALTERNATE_POLISH_INLINE:-0}
+      ALTERNATE_POST_TRANSLATE: ${ALTERNATE_POST_TRANSLATE:-copy}
+      ALTERNATE_ALIAS_INFERENCE: ${ALTERNATE_ALIAS_INFERENCE:-heuristic}
+      ALTERNATE_ALIAS_MODEL: ${ALTERNATE_ALIAS_MODEL:-translategemma:12b}
+      ALTERNATE_ALIAS_TIMEOUT: ${ALTERNATE_ALIAS_TIMEOUT:-120}
+      ALTERNATE_LOG_SKIPPED_QUERIES: ${ALTERNATE_LOG_SKIPPED_QUERIES:-0}
+      ALTERNATE_INCLUDE_COMPLETED: ${ALTERNATE_INCLUDE_COMPLETED:-0}
+      ALTERNATE_MAX_CHAPTERS: ${ALTERNATE_MAX_CHAPTERS:-0}
+      ALTERNATE_TIMEOUT: ${ALTERNATE_TIMEOUT:-30}
+      ALTERNATE_RETRIES: ${ALTERNATE_RETRIES:-3}
+      ALTERNATE_RETRY_SLEEP: ${ALTERNATE_RETRY_SLEEP:-2.0}
+      ALTERNATE_SEARCH_DELAY: ${ALTERNATE_SEARCH_DELAY:-0.5}
+      ALTERNATE_PROVIDER_FAILURE_LIMIT: ${ALTERNATE_PROVIDER_FAILURE_LIMIT:-1}
+      ALTERNATE_DIRECT_SLUG_CANDIDATES: ${ALTERNATE_DIRECT_SLUG_CANDIDATES:-0}
+      ALTERNATE_CHAPTER_DELAY: ${ALTERNATE_CHAPTER_DELAY:-1.5}
+      ALTERNATE_REQUEUE_DONE: ${ALTERNATE_REQUEUE_DONE:-0}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    logging: *default-logging
+    healthcheck: *db-healthcheck
+    command: ["sh", "docker/scripts/run-alternate-scheduler.sh"]
+
+  audio-enqueuer:
+    profiles: ["audio"]
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *pipeline-env
+      AUDIO_ENQUEUE_INTERVAL_SECONDS: ${AUDIO_ENQUEUE_INTERVAL_SECONDS:-1800}
+      AUDIO_ENQUEUE_LIMIT: ${AUDIO_ENQUEUE_LIMIT:-200}
+      AUDIO_OUTPUT_ROOT: ${AUDIO_OUTPUT_ROOT:-story_audio}
+      AUDIO_ENQUEUE_SOURCES: ${AUDIO_ENQUEUE_SOURCES:-}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    logging: *default-logging
+    healthcheck: *db-healthcheck
+    command: ["sh", "docker/scripts/run-audio-enqueuer.sh"]
+
+  ollama:
+    profiles: ["ai"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - betterbox_ollama_data:/root/.ollama
+    logging: *default-logging
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  polish-worker:
+    profiles: ["ai"]
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_started
+    environment:
+      <<: *pipeline-env
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      POLISH_WORKERS: ${POLISH_WORKERS:-1}
+      POLISH_SOURCE_CODES: ${POLISH_SOURCE_CODES:-}
+      POLISH_VI_MODEL: ${POLISH_VI_MODEL:-qwen3:14b}
+      POLISH_TRANSLATE_MODEL: ${POLISH_TRANSLATE_MODEL:-translategemma:12b}
+      POLISH_POST_TRANSLATE: ${POLISH_POST_TRANSLATE:-polish}
+      POLISH_INTERVAL_SECONDS: ${POLISH_INTERVAL_SECONDS:-30}
+      POLISH_MIN_FREE_RAM_GB: ${POLISH_MIN_FREE_RAM_GB:-2.0}
+      POLISH_MAX_CPU_PERCENT: ${POLISH_MAX_CPU_PERCENT:-80}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    logging: *default-logging
+    healthcheck:
+      # Kiểm tra DB + Ollama đều reachable.
+      test: ["CMD", "sh", "-c",
+        "python -c \"import os,psycopg; psycopg.connect(os.environ['STORY_DATABASE_URL']).execute('SELECT 1')\" && \
+         curl -sf ${OLLAMA_URL:-http://ollama:11434}/api/tags > /dev/null"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    command: ["sh", "docker/scripts/run-polish-worker.sh"]
+
+  audio-worker:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: docker/story-tts-gpu.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *pipeline-env
+      AUDIO_DEVICE: ${AUDIO_DEVICE:-cuda}
+      AUDIO_MIN_FREE_VRAM_GB: ${AUDIO_MIN_FREE_VRAM_GB:-7}
+      AUDIO_REFERENCE_AUDIO: ${AUDIO_REFERENCE_AUDIO:-wavs/vieneu_alloy1512_1005.wav}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+      - betterbox_torch_cache:/root/.cache/torch
+      - betterbox_hf_cache:/root/.cache/huggingface
+    logging: *default-logging
+    healthcheck: *db-healthcheck
+    command: ["sh", "docker/scripts/run-audio-worker.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
+  audio-segment-worker:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: docker/story-tts-gpu.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *pipeline-env
+      AUDIO_SEGMENT_DEVICE: ${AUDIO_SEGMENT_DEVICE:-cuda}
+      AUDIO_SEGMENT_MIN_FREE_VRAM_GB: ${AUDIO_SEGMENT_MIN_FREE_VRAM_GB:-7}
+      AUDIO_SEGMENT_MIN_RUNTIME_FREE_VRAM_GB: ${AUDIO_SEGMENT_MIN_RUNTIME_FREE_VRAM_GB:-1}
+      AUDIO_SEGMENT_GPU_WAIT_SECONDS: ${AUDIO_SEGMENT_GPU_WAIT_SECONDS:-20}
+      AUDIO_SEGMENT_MIN_FREE_RAM_GB: ${AUDIO_SEGMENT_MIN_FREE_RAM_GB:-1.5}
+      AUDIO_SEGMENT_MAX_CPU_PERCENT: ${AUDIO_SEGMENT_MAX_CPU_PERCENT:-90}
+      AUDIO_SEGMENT_RESOURCE_WAIT_SECONDS: ${AUDIO_SEGMENT_RESOURCE_WAIT_SECONDS:-10}
+      AUDIO_SEGMENT_OUTPUT_ROOT: ${AUDIO_SEGMENT_OUTPUT_ROOT:-story_audio_segments}
+      AUDIO_SEGMENT_VOICE_KEY: ${AUDIO_SEGMENT_VOICE_KEY:-viterbox_default}
+      AUDIO_SEGMENT_REFERENCE_AUDIO: ${AUDIO_SEGMENT_REFERENCE_AUDIO:-wavs/vieneu_alloy1512_1005.wav}
+      AUDIO_SEGMENT_GPU_LOCK_PATH: ${AUDIO_SEGMENT_GPU_LOCK_PATH:-/tmp/betterbox_tts_gpu.lock}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+      - betterbox_torch_cache:/root/.cache/torch
+      - betterbox_hf_cache:/root/.cache/huggingface
+    logging: *default-logging
+    healthcheck: *db-healthcheck
+    command: ["sh", "docker/scripts/run-audio-segment-worker.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
+volumes:
+  betterbox_torch_cache:
+  betterbox_hf_cache:
+  betterbox_ollama_data:

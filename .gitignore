@@ -1,0 +1,94 @@
+# Local Python environments
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+# Python cache / build artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+build/
+dist/
+.tox/
+.nox/
+
+# Node / frontend build artifacts
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+**/out/
+*.tsbuildinfo
+
+# Split repository: story_reader is pushed as its own repo.
+/story_reader/
+
+# IDE/editor settings
+.vscode/
+.DS_Store
+
+# Environment variables
+.env
+.env.*
+.env*.local
+!.env.example
+!**/.env.example
+.python-version
+
+# Cache and test artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+**/.cache/
+*.log
+
+# Local database / runtime data
+/story_db/postgres/
+/story_pipeline_db/
+/story_db/story_pipeline_db/
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated or downloaded models
+/viterbox/modelViterboxLocal/
+/OmniVoice/model_ASR_chunkformer_local/
+/OmniVoice/model_higgs_audio_v2_tokenizer_local/
+/OmniVoice/modelOmniLocal/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# Generated or runtime data folders
+/story_data/
+/story_audio/
+/story_audio_segments/
+/viterbox/output-profile/
+/viterbox/pretrained/
+/voice_bank/
+/wavs/
+/.browser/
+
+# Local browser/test screenshots and temporary UI artifacts
+.tmp_screens/
+**/.tmp_screens/
+
+# Downloaded documentation dumps / one-off references
+/llms-full.txt
+
+# Internal agent/design/runbook notes. Keep README.md public.
+/AGENTS.md
+/CLAUDE.md
+/DESIGN.md
+/SKILL.md
+/*RUNBOOK.md
+/*CONTEXT.md
+/*CHECKLIST.md

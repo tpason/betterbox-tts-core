@@ -1,0 +1,19 @@
+# Example crontab entries for BetterBox Story DB.
+# Edit paths if your project or venv lives elsewhere.
+
+SHELL=/bin/bash
+PROJECT=/home/yuki/Desktop/python/BetterBox-TTS
+PYTHON=/home/yuki/Desktop/python/BetterBox-TTS/viterbox/venv/bin/python
+
+# Survey Qidian free books every 6 hours.
+0 */6 * * * cd $PROJECT && mkdir -p story_db/logs && $PYTHON scripts/story_pipeline/survey_qidian_free_books.py --ranks free free_all free_completed --limit-per-rank 20 >> story_db/logs/qidian_survey.log 2>&1
+
+# Import the latest survey into Postgres after survey has had time to finish.
+20 */6 * * * cd $PROJECT && $PYTHON -m story_db.story_pipeline_db.cli import-qidian-survey story_data/qidian/free_survey/books.json >> story_db/logs/qidian_import.log 2>&1
+
+# Check unfinished stories for newly added chapters every 6 hours.
+# flock prevents overlapping crawls if the previous run is still working.
+30 */6 * * * cd $PROJECT && mkdir -p story_db/logs && flock -n /tmp/betterbox_crawl_stories.lock $PYTHON scripts/story_pipeline/crawl_stories_from_db.py --sources truyenfull_today royalroad --only-incomplete --min-catalog-check-hours 6 --workers 2 --chapter-delay 1.5 >> story_db/logs/crawl_stories.log 2>&1
+
+# Audio is intentionally not auto-enqueued by cron to avoid filling the disk.
+# Enqueue audio manually for a selected story/chapter range, then keep audio_worker_viterbox.py running.
