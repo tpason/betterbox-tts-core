@@ -81,6 +81,12 @@ out/
 .tmp_screens/
 **/.tmp_screens/
 
+# Local AI agent coordination state
+/.agent/
+/.agents/
+/.claude/
+/.codex/
+
 # Downloaded documentation dumps / one-off references
 /llms-full.txt
 
