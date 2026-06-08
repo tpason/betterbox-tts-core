@@ -656,7 +656,7 @@ def _single_pass_call_with_fallback(
             raise RuntimeError(
                 f"Single-pass sub-chunk output too short after retry "
                 f"({sub_nws}/{sub_src_nws} nws-chars, threshold={_EN_TO_VI_MIN_RATIO}) — "
-                f"job will be requeued with smaller chunk size"
+                f"job will be requeued (worker will retry with same chunk size)"
             )
         sub_outputs.append(sub_out)
         sub_preceding = _tail_context(sub_out)
