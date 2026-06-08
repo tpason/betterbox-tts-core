@@ -1011,7 +1011,7 @@ def main() -> None:
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--temperature", type=float, default=0.25)
     parser.add_argument("--num-ctx", type=int, default=4096)
-    parser.add_argument("--ollama-timeout", type=int, default=300)
+    parser.add_argument("--ollama-timeout", type=int, default=600)
     parser.add_argument("--ollama-retries", type=int, default=3)
     parser.add_argument("--keep-alive", default="24h")
     parser.add_argument("--prompt-profile", choices=("fast", "full"), default="full")

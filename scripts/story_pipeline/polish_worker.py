@@ -24,6 +24,7 @@ from genre_prompts import detect_genre, find_char_map_file, resolve_genre_from_c
 from polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from reader_content_format import format_polished_content as format_reader_polished_content
 from translate_chapter_texts_ollama import single_pass_translate_polish_file, translate_file
+from check_translation_quality import check_polished_quality
 
 
 def story_slug_for_job(job: dict, input_path: Path) -> str:
@@ -359,6 +360,12 @@ def read_formatted_polished_output(output_path: Path, job: dict, *, write_back: 
     return read_formatted_output(output_path, job, write_back=write_back, label="polished")
 
 
+def _quality_warn(text: str, genre: str, char_map: str, label: str) -> None:
+    issues = check_polished_quality(text, genre=genre, char_map_path=char_map)
+    if issues:
+        log(f"[QUALITY_WARN] {label}: {', '.join(issues)}")
+
+
 def story_metadata_args(args: argparse.Namespace) -> Namespace:
     return Namespace(
         ollama_url=args.ollama_url,
@@ -570,6 +577,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             _build_args_with_char_map(model, max_chars, genre),
         )
         polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
+        _quality_warn(polished_text_content, genre, effective_char_map or "", f"vi ch{current_chapter}")
         repo.update_chapter_text_outputs(
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
@@ -584,6 +592,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         sp_args.num_ctx = args.single_pass_num_ctx
         single_pass_translate_polish_file(input_path, output_path, sp_args)
         polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
+        _quality_warn(polished_text_content, genre, effective_char_map or "", f"single-pass ch{current_chapter}")
         repo.update_chapter_text_outputs(
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
@@ -650,6 +659,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 _build_args_with_char_map(args.vi_model, polish_max_chars, genre),
             )
         polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
+        _quality_warn(polished_text_content, genre, effective_char_map or "", f"two-pass ch{current_chapter}")
         repo.update_chapter_text_outputs(
             job["chapter_id"],
             translated_text_path=translated_path.as_posix(),

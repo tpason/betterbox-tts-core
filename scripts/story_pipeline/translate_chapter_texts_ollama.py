@@ -788,7 +788,7 @@ def main() -> None:
     # 4096 vừa đủ cho chunk 2500 ký tự Trung/Hàn + system prompt + output Vietnamese.
     # Tăng lên 6144-8192 nếu gặp output bị cắt ngắn với ngôn ngữ verbose (Hàn, Anh).
     parser.add_argument("--num-ctx", type=int, default=4096)
-    parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--keep-alive", default="30m")
     parser.add_argument("--max-chars-per-chunk", type=int, default=2500)
