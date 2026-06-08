@@ -653,9 +653,10 @@ def _single_pass_call_with_fallback(
         sub_nws = len(re.sub(r"\s+", "", sub_out))
         sub_src_nws = len(re.sub(r"\s+", "", sub_chunk))
         if sub_nws < sub_src_nws * _EN_TO_VI_MIN_RATIO:
-            print(
-                f"[QUALITY WARN] Sub-chunk still short ({sub_nws}/{sub_src_nws} nws-chars) — "
-                f"accepting anyway (never return raw English)"
+            raise RuntimeError(
+                f"Single-pass sub-chunk output too short after retry "
+                f"({sub_nws}/{sub_src_nws} nws-chars, threshold={_EN_TO_VI_MIN_RATIO}) — "
+                f"job will be requeued with smaller chunk size"
             )
         sub_outputs.append(sub_out)
         sub_preceding = _tail_context(sub_out)

@@ -583,23 +583,25 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         sp_args = _build_args_with_char_map(translate_model, single_pass_max_chars, genre)
         sp_args.num_ctx = args.single_pass_num_ctx
         single_pass_translate_polish_file(input_path, output_path, sp_args)
-        effective_char_map = maybe_auto_update_char_map(
-            job,
-            args,
-            slug=job_slug,
-            current_chapter=current_chapter,
-            existing_char_map=effective_char_map,
-            text_source=char_map_text_source,
-            genre=genre,
-        )
-        if effective_char_map:
-            log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
         polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
         repo.update_chapter_text_outputs(
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
             polished_text_content=polished_text_content,
         )
+        # For single-pass, polished output IS the translated output — use it for chapter title and char-map.
+        translated_chapter_title = maybe_update_translated_chapter_title(job, polished_text_content)
+        effective_char_map = maybe_auto_update_char_map(
+            job,
+            args,
+            slug=job_slug,
+            current_chapter=current_chapter,
+            existing_char_map=effective_char_map,
+            text_source="polished",
+            genre=genre,
+        )
+        if effective_char_map:
+            log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
     else:
         if args.single_pass and raw_language != "en":
             log(f"[SINGLE_PASS] WARNING: --single-pass only supports EN; raw_language={raw_language!r} → falling back to two-pass")
@@ -662,6 +664,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             "output_path": output_path.as_posix(),
             "raw_language": raw_language,
             "translated_chapter_title": locals().get("translated_chapter_title") or None,
+            **({"single_pass": True} if args.single_pass and raw_language == "en" else {}),
         },
     )
     log(f"[DONE] {job['id']} -> {output_path}")

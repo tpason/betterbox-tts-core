@@ -31,6 +31,12 @@ GENRE_WESTERN_FANTASY = "western_fantasy"
 # Source codes known to produce Korean-language content.
 _KO_SOURCE_CODES: frozenset[str] = frozenset({"naver", "naver_series", "kakao", "kakaopage"})
 
+# English web-novel sources — default to western_fantasy when no genre signal.
+_EN_SOURCE_CODES: frozenset[str] = frozenset({
+    "royalroad", "wetriedtls", "skydemonorder", "lightnovelpub",
+    "novelbin", "freewebnovel", "novelfire", "novelhub",
+})
+
 # Explicit western_fantasy signals — checked before language heuristics.
 _WESTERN_FANTASY_STRONG_KW: list[str] = [
     "western fantasy",
@@ -84,7 +90,7 @@ def detect_genre(category: str, raw_language: str = "", source_code: str = "") -
     src = (source_code or "").lower()
 
     is_korean = lang == "ko" or src in _KO_SOURCE_CODES
-    is_english = lang == "en"
+    is_english = lang == "en" or src in _EN_SOURCE_CODES
 
     # Step 1: Explicit western_fantasy keywords win regardless of language.
     for kw in _WESTERN_FANTASY_STRONG_KW:
@@ -103,8 +109,8 @@ def detect_genre(category: str, raw_language: str = "", source_code: str = "") -
             if kw in normalized:
                 return genre
 
-    # Step 4: Korean source with no specific genre signal → default to western_fantasy.
-    if is_korean:
+    # Step 4: Korean or English web-novel source with no specific genre signal → western_fantasy.
+    if is_korean or is_english:
         return GENRE_WESTERN_FANTASY
 
     return ""
