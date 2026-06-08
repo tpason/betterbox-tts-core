@@ -460,6 +460,8 @@ def needs_translation(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
     has_translated_output = bool(row.get("translated_text_path") or row.get("translated_text_content"))
     if not row.get("is_translated") or not has_translated_output:
         return True, "missing_translation"
+    if getattr(args, "overwrite_translation", False):
+        return True, "overwrite"
     if args.only_missing_translation or not args.check_polished_language:
         return False, ""
     if not row.get("is_polished") and not row.get("polished_text_path") and not row.get("polished_text_content"):
