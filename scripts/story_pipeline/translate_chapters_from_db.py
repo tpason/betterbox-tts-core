@@ -41,6 +41,10 @@ NON_VI_SOURCE_LANGUAGES = {
     "freewebnovel": "en",
     "lightnovelpub": "en",
     "skydemonorder": "en",
+    "wetriedtls": "en",
+    "fanmtl": "en",
+    "novelfire": "en",
+    "novelhub": "en",
     "naver_series": "ko",
 }
 

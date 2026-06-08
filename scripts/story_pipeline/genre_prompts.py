@@ -34,7 +34,7 @@ _KO_SOURCE_CODES: frozenset[str] = frozenset({"naver", "naver_series", "kakao", 
 # English web-novel sources — default to western_fantasy when no genre signal.
 _EN_SOURCE_CODES: frozenset[str] = frozenset({
     "royalroad", "wetriedtls", "skydemonorder", "lightnovelpub",
-    "novelbin", "freewebnovel", "novelfire", "novelhub",
+    "novelbin", "freewebnovel", "novelfire", "novelhub", "fanmtl",
 })
 
 # Explicit western_fantasy signals — checked before language heuristics.
