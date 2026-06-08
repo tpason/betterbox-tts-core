@@ -211,7 +211,7 @@ def main() -> None:
     parser.add_argument("--raw-en-output-root", default="story_data/raw_en")
     parser.add_argument("--polished-output-root", default="story_data/polished")
     parser.add_argument("--vi-model", default="qwen3:14b")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--polish-max-attempts", type=int, default=3)
     args = parser.parse_args()
 

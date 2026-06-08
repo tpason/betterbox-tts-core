@@ -394,7 +394,9 @@ def chapter_path(root: Path, slug: str, number: int) -> Path:
     return root / slug / f"chapter{number:04d}.txt"
 
 
-def write_if_needed(path: Path, text: str, overwrite: bool) -> bool:
+def write_if_needed(path: Path, text: str, overwrite: bool, persist: bool = True) -> bool:
+    if not persist:
+        return True
     if path.exists() and not overwrite:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -546,7 +548,7 @@ def main() -> None:
     parser.add_argument("--enqueue-polish", action="store_true")
     parser.add_argument("--polished-output-root", default="story_data/polished")
     parser.add_argument("--translated-output-root", default="story_data/translated")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--polish-max-attempts", type=int, default=3)
     parser.add_argument("--post-translate", choices=("polish", "copy"), default="copy")
     args = parser.parse_args()

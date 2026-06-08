@@ -87,6 +87,13 @@ out/
 /.claude/
 /.codex/
 
+# Local agent workflow scripts (private, not pipeline code)
+/start-agents.sh
+/scripts/request_codex_review.sh
+
+# Firecrawl scraped data cache
+/.firecrawl/
+
 # Downloaded documentation dumps / one-off references
 /llms-full.txt
 

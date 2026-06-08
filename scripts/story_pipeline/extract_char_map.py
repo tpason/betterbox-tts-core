@@ -42,7 +42,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from story_db.story_pipeline_db import repository as repo
 from story_db.story_pipeline_db.db import connect
-from genre_prompts import find_char_map_file
+from genre_prompts import find_char_map_file, genre_header_line
 
 # ── Prompt cho Ollama ──────────────────────────────────────────────────────────
 
@@ -104,12 +104,15 @@ def fetch_chapters(
     from_chapter: int = 0,
     to_chapter: int = 0,
     limit: int = 0,
-    use_polished: bool = True,
+    text_source: str = "polished",
 ) -> list[dict[str, Any]]:
+    text_source = text_source if text_source in {"raw", "translated", "polished"} else "polished"
     query = """
         SELECT
             c.id AS chapter_id,
             c.chapter_number,
+            c.raw_text_content,
+            c.raw_text_path,
             c.polished_text_content,
             c.polished_text_path,
             c.translated_text_content,
@@ -140,10 +143,12 @@ def fetch_chapters(
         query += " AND c.chapter_number <= %(to_chapter)s"
         params["to_chapter"] = to_chapter
 
-    if use_polished:
-        query += " AND (c.polished_text_content IS NOT NULL OR c.polished_text_path IS NOT NULL)"
-    else:
+    if text_source == "raw":
+        query += " AND (c.raw_text_content IS NOT NULL OR c.raw_text_path IS NOT NULL)"
+    elif text_source == "translated":
         query += " AND (c.translated_text_content IS NOT NULL OR c.translated_text_path IS NOT NULL)"
+    else:
+        query += " AND (c.polished_text_content IS NOT NULL OR c.polished_text_path IS NOT NULL)"
 
     query += " ORDER BY c.chapter_number"
     if limit > 0:
@@ -155,14 +160,18 @@ def fetch_chapters(
         return [dict(row) for row in rows]
 
 
-def get_chapter_text(row: dict[str, Any], use_polished: bool = True) -> str:
+def get_chapter_text(row: dict[str, Any], text_source: str = "polished") -> str:
     """Lấy text từ content trong DB hoặc từ file."""
-    if use_polished:
-        content = row.get("polished_text_content") or ""
-        path_str = row.get("polished_text_path") or ""
-    else:
+    text_source = text_source if text_source in {"raw", "translated", "polished"} else "polished"
+    if text_source == "raw":
+        content = row.get("raw_text_content") or ""
+        path_str = row.get("raw_text_path") or ""
+    elif text_source == "translated":
         content = row.get("translated_text_content") or ""
         path_str = row.get("translated_text_path") or ""
+    else:
+        content = row.get("polished_text_content") or ""
+        path_str = row.get("polished_text_path") or ""
 
     if content and len(content) > 200:
         return content[:8000]  # Chỉ cần sample đầu chapter
@@ -466,6 +475,7 @@ def format_char_map(
     chapter_range: str,
     arc_name: str = "",
     existing_content: str = "",
+    genre: str = "",
 ) -> str:
     """Render char_map file. Nếu có existing_content và arc_name, append arc mới."""
     now = datetime.now().strftime("%Y-%m-%d")
@@ -498,8 +508,16 @@ def format_char_map(
         f"## Truyện: {story_title} ({story_id})",
         f"## Cập nhật: {now} từ chapters {chapter_range}",
         f"## Auto-generated bởi extract_char_map.py — chỉnh sửa thủ công để tinh chỉnh",
-        "",
     ]
+    # Preserve existing genre header; fall back to injecting from genre arg
+    _existing_genre_match = re.search(r"^(##\s*Thể loại[^\n]*)", existing_content or "", re.MULTILINE)
+    if _existing_genre_match:
+        lines.append(_existing_genre_match.group(1))
+    elif genre:
+        _genre_line = genre_header_line(genre)
+        if _genre_line:
+            lines.append(_genre_line)
+    lines.append("")
 
     # Giữ lại section ALIASES từ file cũ nếu có
     if existing_content:
@@ -633,7 +651,13 @@ def main() -> None:
     parser.add_argument(
         "--use-translated",
         action="store_true",
-        help="Dùng translated text thay vì polished text.",
+        help="Dùng translated text thay vì polished text. Tương đương --text-source translated.",
+    )
+    parser.add_argument(
+        "--text-source",
+        choices=("raw", "translated", "polished"),
+        default="polished",
+        help="Nguồn text để extract char-map. Auto-worker dùng raw cho truyện Việt, translated cho truyện dịch.",
     )
     parser.add_argument(
         "--append-only",
@@ -650,6 +674,16 @@ def main() -> None:
         default="",
         help="Override đường dẫn output. Mặc định: story_data/char_maps/{story_id}-{slug}.txt",
     )
+    parser.add_argument(
+        "--genre",
+        default="",
+        help=(
+            "Thể loại để inject vào header char_map khi tạo mới: "
+            "western_fantasy, tien_hiep, huyen_huyen, he_thong, kiem_hiep, "
+            "do_thi, xuyen_khong, mat_the, vong_du, lang_man. "
+            "Bỏ trống nếu file cũ đã có dòng Thể loại."
+        ),
+    )
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default="qwen3:14b")
     parser.add_argument("--temperature", type=float, default=0.1)
@@ -663,6 +697,8 @@ def main() -> None:
     if not args.story_title and not args.story_id:
         parser.error("Cần --story-title hoặc --story-id")
 
+    text_source = "translated" if args.use_translated else args.text_source
+
     print(f"[QUERY] Lấy chapters từ DB...")
     rows = fetch_chapters(
         story_title=args.story_title,
@@ -670,7 +706,7 @@ def main() -> None:
         from_chapter=args.from_chapter,
         to_chapter=args.to_chapter,
         limit=0,
-        use_polished=not args.use_translated,
+        text_source=text_source,
     )
 
     if not rows:
@@ -683,13 +719,19 @@ def main() -> None:
     chapter_nums = sorted(int(r["chapter_number"]) for r in rows)
     chapter_range = f"{chapter_nums[0]:04d}-{chapter_nums[-1]:04d}"
 
-    print(f"[INFO] {story_title} ({story_id}) — {len(rows)} chapters ({chapter_range}), slug={slug}")
+    print(f"[INFO] {story_title} ({story_id}) — {len(rows)} chapters ({chapter_range}), slug={slug}, text_source={text_source}")
 
     # Sample chapters đều từ toàn range
     sample_size = args.sample_chapters if args.sample_chapters > 0 else len(rows)
     if sample_size < len(rows):
-        step = max(1, len(rows) // sample_size)
-        sampled = rows[::step][:sample_size]
+        if sample_size == 1:
+            sampled = [rows[-1]]
+        else:
+            indexes = [
+                round(i * (len(rows) - 1) / (sample_size - 1))
+                for i in range(sample_size)
+            ]
+            sampled = [rows[i] for i in dict.fromkeys(indexes)]
     else:
         sampled = rows
 
@@ -719,10 +761,11 @@ def main() -> None:
     # Extract characters from each sampled chapter
     all_chars: dict[str, dict[str, Any]] = dict(existing_chars)
     failed = 0
+    successful_nums: list[int] = []
     with requests.Session() as session:
         for i, row in enumerate(sampled, 1):
             ch_num = int(row["chapter_number"])
-            text = get_chapter_text(row, use_polished=not args.use_translated)
+            text = get_chapter_text(row, text_source=text_source)
             if not text or len(text) < 200:
                 print(f"  [{i}/{len(sampled)}] ch{ch_num:04d}: SKIP (text rỗng)")
                 continue
@@ -739,6 +782,7 @@ def main() -> None:
                     chapter_num=ch_num,
                 )
                 all_chars = merge_characters(all_chars, chars, chapter_num=ch_num)
+                successful_nums.append(ch_num)
                 print(f"OK ({len(chars)} chars, total={len(all_chars)})")
             except Exception as exc:
                 print(f"FAIL: {exc}")
@@ -770,6 +814,7 @@ def main() -> None:
             chapter_range=chapter_range,
             arc_name=args.arc_name,
             existing_content=existing_content if args.append_only or args.arc_name else "",
+            genre=getattr(args, "genre", ""),
         )
 
     if args.dry_run:
@@ -779,12 +824,19 @@ def main() -> None:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(output_content, encoding="utf-8")
+    coverage_nums = successful_nums or sampled_nums
     try:
         repo.update_story_metadata(
             story_id,
             {
                 "char_map_path": out_path.relative_to(ROOT).as_posix(),
-                "char_map_updated_to_chapter": chapter_nums[-1],
+                "char_map_updated_to_chapter": max(coverage_nums),
+                "char_map_query_from_chapter": chapter_nums[0],
+                "char_map_query_to_chapter": chapter_nums[-1],
+                "char_map_sampled_chapters": sampled_nums,
+                "char_map_sampled_to_chapter": max(sampled_nums),
+                "char_map_successful_chapters": successful_nums,
+                "char_map_text_source": text_source,
                 "char_map_updated_at": datetime.now().isoformat(timespec="seconds"),
             },
         )

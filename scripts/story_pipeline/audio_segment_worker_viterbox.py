@@ -297,6 +297,11 @@ def main() -> None:
     if args.device == "cuda":
         wait_for_gpu(args)
     print(f"worker={args.worker_id}, device={args.device}, reference={reference_audio}")
+
+    stale_reset = repo.reset_stale_running_jobs("audio_chapter_segments", stale_after_minutes=240)
+    if stale_reset:
+        print(f"[STARTUP] reset {stale_reset} stale running audio segment jobs back to pending")
+
     lock_handle = acquire_gpu_lock(Path(args.gpu_lock_path)) if args.device == "cuda" else None
     try:
         model = Viterbox.from_pretrained(args.device)

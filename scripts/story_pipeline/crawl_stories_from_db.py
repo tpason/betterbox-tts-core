@@ -376,7 +376,7 @@ def enqueue_polish(
     story: dict[str, Any],
     chapter: dict[str, Any],
     slug: str,
-    raw_path: Path,
+    raw_path: Path | None,
     raw_language: str,
     polished_root: Path,
     vi_model: str,
@@ -384,7 +384,8 @@ def enqueue_polish(
     max_attempts: int,
     post_translate: str = "polish",
 ) -> dict[str, Any]:
-    polished_path = polished_root / slug / raw_path.name
+    chapter_stem = raw_path.stem if raw_path else f"chapter{chapter['chapter_number']:04d}"
+    polished_path = polished_root / slug / f"{chapter_stem}.txt"
     model = vi_model if raw_language == "vi" else translate_model
     char_map_file = find_char_map_file(story_id=str(story.get("id") or ""), slug=slug)
     job = repo.enqueue_chapter_job(
@@ -393,14 +394,14 @@ def enqueue_polish(
         story_id=story["id"],
         source_code=source_code,
         model=model,
-        input_path=raw_path.as_posix(),
+        input_path=raw_path.as_posix() if raw_path else "",
         output_path=polished_path.as_posix(),
         payload={
             "raw_language": raw_language,
             "story_slug": slug,
             "chapter_number": chapter["chapter_number"],
-            "chapter_title": chapter.get("title") or raw_path.stem,
-            "source_chapter_title": chapter.get("title") or raw_path.stem,
+            "chapter_title": chapter.get("title") or chapter_stem,
+            "source_chapter_title": chapter.get("title") or chapter_stem,
             "translate_story_metadata": raw_language.lower() not in {"vi"},
             "source_story_title": story.get("original_title") or story.get("title") or "",
             "source_story_author": (story.get("metadata") or {}).get("source_author") or story.get("author") or "",
@@ -419,7 +420,7 @@ def enqueue_polish(
         max_attempts=max_attempts,
     )
     mode = post_translate if raw_language.lower() not in {"vi"} else "polish"
-    print(f"[JOB] polish_chapter {job['status']} mode={mode}: {slug}/{raw_path.name}")
+    print(f"[JOB] polish_chapter {job['status']} mode={mode}: {slug}/{chapter_stem}.txt")
     return job
 
 
@@ -431,18 +432,19 @@ def upsert_downloaded_chapter(
     title: str,
     source_url: str,
     raw_language: str,
-    raw_path: Path,
+    raw_path: Path | None,
     raw_text_content: str | None = None,
     volume: str | None = None,
     is_locked: bool = False,
     lock_reason: str | None = None,
 ) -> dict[str, Any]:
+    title_fallback = raw_path.stem if raw_path else f"chapter{chapter_number:04d}"
     return repo.upsert_chapter(
         story["id"],
         {
             "source_chapter_id": source_chapter_id,
             "chapter_number": chapter_number,
-            "title": title or raw_path.stem,
+            "title": title or title_fallback,
             "source_url": source_url,
             "volume": volume,
             "is_locked": is_locked,
@@ -450,12 +452,14 @@ def upsert_downloaded_chapter(
             "raw_language": raw_language,
             "raw_text_path": raw_path.as_posix() if raw_path else None,
             "raw_text_content": raw_text_content,
-            "is_downloaded": raw_path.exists() if raw_path else False,
+            "is_downloaded": bool(raw_text_content) or (raw_path.exists() if raw_path else False),
         },
     )
 
 
-def write_if_needed(path: Path, text: str, overwrite: bool) -> bool:
+def write_if_needed(path: Path, text: str, overwrite: bool, persist: bool = True) -> bool:
+    if not persist:
+        return True
     if path.exists() and not overwrite:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -586,7 +590,7 @@ def crawl_hako_story(story_row: dict[str, Any], args: argparse.Namespace) -> Non
                 print(f"[SKIP] locked/empty hako {slug}/chapter{number:04d}")
                 continue
             heading = title or chapter.get("title") or f"Chapter {number}"
-            write_if_needed(raw_path, f"{heading}\n\n{content}", args.overwrite)
+            write_if_needed(raw_path, f"{heading}\n\n{content}", args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(number),
@@ -664,7 +668,7 @@ def crawl_wattpad_story(story_row: dict[str, Any], args: argparse.Namespace) -> 
             if not content or len(content) < args.min_text_chars:
                 print(f"[SKIP] empty wattpad {slug}/chapter{index:04d}")
                 continue
-            write_if_needed(raw_path, content, args.overwrite)
+            write_if_needed(raw_path, content, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(index),
@@ -763,7 +767,7 @@ def crawl_truyenfull_today_story(story_row: dict[str, Any], args: argparse.Names
                 continue
             title = chapter.get("title") or f"Chương {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -864,7 +868,7 @@ def crawl_truyenyy_story(story_row: dict[str, Any], args: argparse.Namespace) ->
                 continue
             title = chapter.get("title") or f"Chương {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -981,7 +985,7 @@ def crawl_docln_story(story_row: dict[str, Any], args: argparse.Namespace) -> No
                 continue
             title = chapter.get("title") or f"Chương {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -1118,7 +1122,7 @@ def crawl_manhwatv_story(story_row: dict[str, Any], args: argparse.Namespace) ->
                 continue
             title = chapter.get("title") or f"Chương {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -1256,7 +1260,7 @@ def crawl_generic_vn_story(
             consecutive_content_misses = 0
             title = chapter.get("title") or f"Chương {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -1355,7 +1359,7 @@ def crawl_qidian_story(story_row: dict[str, Any], args: argparse.Namespace) -> N
                 print(f"[SKIP] empty qidian {slug}/chapter{number:04d}")
                 continue
             title = chapter.get("title") or f"chapter{number}"
-            write_if_needed(raw_path, f"{title}\n\n{content}", args.overwrite)
+            write_if_needed(raw_path, f"{title}\n\n{content}", args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(number),
@@ -1459,7 +1463,7 @@ def crawl_royalroad_story(story_row: dict[str, Any], args: argparse.Namespace) -
                 continue
             title = chapter.get("title") or f"Chapter {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -1595,7 +1599,7 @@ def crawl_lightnovelpub_story(story_row: dict[str, Any], args: argparse.Namespac
                 if page_title:
                     title = page_title
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -1714,7 +1718,7 @@ def crawl_english_public_story(
                 continue
             title = chapter.get("title") or f"Chapter {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
+            write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -1884,7 +1888,7 @@ def crawl_fanmtl_story(story_row: dict[str, Any], args: argparse.Namespace) -> N
                 continue
             title = chapter.get("title") or f"Chapter {number}"
             text = f"{title}\n\n{content}".strip() + "\n"
-            fanmtl_write_if_needed(raw_path, text, args.overwrite)
+            fanmtl_write_if_needed(raw_path, text, args.overwrite, persist=not getattr(args, "no_persist_files", False))
             db_chapter = upsert_downloaded_chapter(
                 story,
                 source_chapter_id=str(chapter.get("source_chapter_id") or number),
@@ -2200,6 +2204,11 @@ def main() -> None:
     parser.add_argument("--raw-zh-output-root", default="story_data/raw_zh")
     parser.add_argument("--raw-en-output-root", default="story_data/raw_en")
     parser.add_argument("--polished-output-root", default="story_data/polished")
+    parser.add_argument(
+        "--no-persist-files",
+        action="store_true",
+        help="Không ghi file txt ra disk; lưu nội dung trực tiếp vào DB. Job polish sẽ dùng DB content.",
+    )
     parser.add_argument("--skydemonorder-profile-dir", default=".browser/skydemonorder")
     parser.add_argument("--skydemonorder-headful", action="store_true", help="Mở browser thật để xử lý Cloudflare/login.")
     parser.add_argument("--skydemonorder-manual-wait", type=int, default=0)
@@ -2209,7 +2218,7 @@ def main() -> None:
     parser.add_argument("--novelfire-manual-wait", type=int, default=0)
     parser.add_argument("--novelfire-wait-ms", type=int, default=2000)
     parser.add_argument("--vi-model", default="qwen3:14b")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument(
         "--post-translate",
         choices=("polish", "copy"),

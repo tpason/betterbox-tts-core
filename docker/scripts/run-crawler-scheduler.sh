@@ -31,7 +31,8 @@ while true; do
     --chapter-delay "${CRAWLER_CHAPTER_DELAY:-1.5}" \
     --chapter-workers "${CRAWLER_CHAPTER_WORKERS:-2}" \
     --max-consecutive-content-misses "${CRAWLER_MAX_CONSECUTIVE_CONTENT_MISSES:-1}" \
-    --post-translate "${CRAWLER_POST_TRANSLATE:-polish}"
+    --post-translate "${CRAWLER_POST_TRANSLATE:-polish}" \
+    --no-persist-files
 
   if [ "${CRAWLER_ONLY_INCOMPLETE:-1}" = "1" ]; then
     set -- "$@" --only-incomplete

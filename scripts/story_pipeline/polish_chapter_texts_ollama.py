@@ -18,11 +18,19 @@ from genre_prompts import (
     infer_genre_from_char_map,
     inject_genre_into_system,
     inject_char_map_into_system,
+    filter_char_map_for_text,
     load_char_map,
     parse_aliases,
     apply_aliases,
 )
 from reader_content_format import format_polished_content as format_reader_polished_content
+from story_memory import (
+    apply_story_memory_replacements,
+    build_story_memory_prompt,
+    find_story_memory_quality_issues,
+    load_story_memory,
+    story_memory_status,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +41,12 @@ CHAPTER_PATTERN = re.compile(r"chapter(\d+)\.txt$", re.IGNORECASE)
 
 SYSTEM_PROMPT = """Bạn là biên tập viên truyện audio tiếng Việt, chuyên xử lý truyện dịch máy (tiên hiệp, huyền huyễn, hệ thống, fantasy phương Tây, Korean light novel, lãng mạn, v.v.).
 
-Nhiệm vụ: chuyển văn bản dịch máy thành tiếng Việt tự nhiên, mượt mà — đọc như văn kể, văn tả, không còn dấu vết dịch máy. Tập trung sửa ngôn ngữ và văn phong, không thêm hay bỏ nội dung.
+Nhiệm vụ: chuyển văn bản dịch máy thành tiếng Việt tự nhiên, mượt mà — đọc như văn kể, văn tả của người Việt viết, không còn dấu vết dịch máy. Tập trung sửa ngôn ngữ và văn phong, không thêm hay bỏ nội dung.
+
+Xử lý câu tối nghĩa (ưu tiên cao):
+- Câu dịch máy tối nghĩa, lủng củng hoặc đọc không hiểu được: dựa vào ngữ cảnh trước và sau để suy ra nghĩa hợp lý nhất, rồi viết lại thành câu tiếng Việt rõ ràng.
+- Không giữ nguyên câu tối nghĩa chỉ vì nó đã có trong bản dịch gốc — câu tối nghĩa trong bản dịch gốc không có nghĩa là phải giữ nguyên câu tối nghĩa trong bản biên tập.
+- Cấu trúc câu dịch máy cứng nhắc (subject-verb-object dịch thẳng từ tiếng Trung/Hàn): viết lại theo cú pháp tiếng Việt tự nhiên, không copy cấu trúc câu nguồn.
 
 Nguyên tắc bất di bất dịch:
 - Chỉ trả về văn bản đã biên tập. Không giải thích, không nhận xét, không markdown, không tiêu đề.
@@ -333,11 +346,24 @@ def build_messages(
     genre: str = "",
     char_map: str = "",
     preceding_context: str = "",
+    story_memory_context: str = "",
 ) -> list[dict[str, str]]:
     addendum = get_polish_genre_addendum(genre)
+    focused_char_map = filter_char_map_for_text(
+        char_map,
+        f"{preceding_context}\n\n{text}".strip(),
+    ) if char_map else ""
     if prompt_profile == "fast":
         system = inject_genre_into_system(FAST_SYSTEM_PROMPT, addendum)
-        system = inject_char_map_into_system(system, char_map)
+        system = inject_char_map_into_system(system, focused_char_map)
+        if story_memory_context:
+            system += (
+                "\n\n"
+                "══════ STORY MEMORY / ROLE BIBLE / GLOSSARY (ƯU TIÊN CAO) ══════\n"
+                "Các quy tắc sau đặc thù cho truyện, nhân vật, role đại chúng, biệt danh và thuật ngữ. "
+                "Chúng ghi đè quy tắc chung nếu mâu thuẫn:\n"
+                f"{story_memory_context}"
+            )
         if preceding_context:
             user_content = FAST_USER_PROMPT_WITH_CONTEXT_TEMPLATE.format(
                 preceding_context=preceding_context, text=text
@@ -349,7 +375,15 @@ def build_messages(
             {"role": "user", "content": user_content},
         ]
     system = inject_genre_into_system(SYSTEM_PROMPT, addendum)
-    system = inject_char_map_into_system(system, char_map)
+    system = inject_char_map_into_system(system, focused_char_map)
+    if story_memory_context:
+        system += (
+            "\n\n"
+            "══════ STORY MEMORY / ROLE BIBLE / GLOSSARY (ƯU TIÊN CAO) ══════\n"
+            "Các quy tắc sau đặc thù cho truyện, nhân vật, role đại chúng, biệt danh và thuật ngữ. "
+            "Chúng ghi đè quy tắc chung nếu mâu thuẫn:\n"
+            f"{story_memory_context}"
+        )
     if preceding_context:
         user_content = USER_PROMPT_WITH_CONTEXT_TEMPLATE.format(
             preceding_context=preceding_context, text=text
@@ -611,13 +645,23 @@ def call_ollama(
     genre: str = "",
     char_map: str = "",
     preceding_context: str = "",
+    story_memory_context: str = "",
     session: requests.Session | None = None,
+    no_think: bool = True,
 ) -> str:
     url = base_url.rstrip("/") + "/api/chat"
+    messages = build_messages(text, prompt_profile, genre, char_map, preceding_context, story_memory_context)
+    # Disable Qwen3 thinking mode for polish: rewriting doesn't need deep reasoning,
+    # and thinking tokens eat into context window leaving less room for content.
+    if no_think and "qwen3" in model.lower():
+        for msg in messages:
+            if msg["role"] == "user":
+                msg["content"] = "/no_think\n\n" + msg["content"]
+                break
     payload: dict[str, Any] = {
         "model": model,
         "stream": False,
-        "messages": build_messages(text, prompt_profile, genre, char_map, preceding_context),
+        "messages": messages,
         "options": {
             "temperature": temperature,
             "num_ctx": num_ctx,
@@ -648,7 +692,7 @@ def call_ollama(
     raise RuntimeError(f"Ollama failed after {retries} retries: {last_error}")
 
 
-def _tail_context(text: str, max_chars: int = 600) -> str:
+def _tail_context(text: str, max_chars: int = 1200) -> str:
     """Lấy phần cuối của text làm preceding context cho chunk tiếp theo."""
     text = text.strip()
     if len(text) <= max_chars:
@@ -668,6 +712,31 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
         print(f"[SKIP] File rỗng: {input_path}")
         return
 
+    prompt_profile = getattr(args, "prompt_profile", "full")
+    char_map_file = getattr(args, "char_map_file", "")
+    char_map = load_char_map(char_map_file)
+    genre = getattr(args, "genre", "") or infer_genre_from_char_map(char_map)
+    story_id = str(getattr(args, "story_id", "") or "")
+    story_slug = str(getattr(args, "story_slug", "") or input_path.parent.name)
+    story_memory = load_story_memory(
+        story_memory_dir=getattr(args, "story_memory_dir", ""),
+        story_id=story_id,
+        slug=story_slug,
+        char_map_file=char_map_file,
+    )
+
+    # Alias normalization: chuẩn hóa tên sai trước khi gửi Ollama hoặc clean-only.
+    aliases = parse_aliases(char_map) if char_map else {}
+    if aliases:
+        normalized = apply_aliases(raw_text, aliases)
+        if normalized != raw_text:
+            print(f"[ALIAS] Đã chuẩn hóa {sum(1 for k in aliases if k in raw_text.lower())} alias(es)")
+            raw_text = normalized
+    memory_normalized = apply_story_memory_replacements(raw_text, story_memory)
+    if memory_normalized != raw_text:
+        print("[STORY_MEMORY] Đã chuẩn hóa tên/thuật ngữ theo story memory")
+        raw_text = memory_normalized
+
     polish_mode = getattr(args, "polish_mode", "llm")
     if polish_mode == "clean":
         issues = validate_tts_text(raw_text)
@@ -676,60 +745,101 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
             for issue in issues:
                 print(f"  - {issue}")
         warn_addressing_quality(raw_text, input_path.name)
+        memory_issues = find_story_memory_quality_issues(raw_text, story_memory, genre=genre)
+        if memory_issues:
+            print(f"[STORY_MEMORY WARN] {input_path.name}: {len(memory_issues)} issue(s)")
+            for issue in memory_issues[:12]:
+                print(f"  - {issue}")
+            if len(memory_issues) > 12:
+                print(f"  - ... {len(memory_issues) - 12} more")
+            if getattr(args, "fail_on_story_memory_issues", False):
+                raise RuntimeError(f"Story memory QA failed for {input_path.name}: {memory_issues[:5]}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(raw_text.strip() + "\n", encoding="utf-8")
         print(f"Đã lưu clean-only: {output_path}")
         return
 
-    prompt_profile = getattr(args, "prompt_profile", "full")
-    char_map = load_char_map(getattr(args, "char_map_file", None))
-    genre = getattr(args, "genre", "") or infer_genre_from_char_map(char_map)
-
-    # Alias normalization: chuẩn hóa tên sai trước khi gửi Ollama
-    aliases = parse_aliases(char_map) if char_map else {}
-    if aliases:
-        normalized = apply_aliases(raw_text, aliases)
-        if normalized != raw_text:
-            print(f"[ALIAS] Đã chuẩn hóa {sum(1 for k in aliases if k in raw_text.lower())} alias(es)")
-            raw_text = normalized
-
     chunks = split_text(raw_text, args.max_chars_per_chunk)
     char_map_note = f", char_map={'yes' if char_map else 'no'}"
-    print(f"\n=== {input_path.name}: {len(raw_text)} chars -> {len(chunks)} chunks, prompt={prompt_profile}, genre={genre or 'default'}{char_map_note} ===")
+    print(
+        f"\n=== {input_path.name}: {len(raw_text)} chars -> {len(chunks)} chunks, "
+        f"prompt={prompt_profile}, genre={genre or 'default'}{char_map_note}, {story_memory_status(story_memory)} ==="
+    )
+
+    min_ratio = getattr(args, "min_output_ratio", 0.70)
+
+    def _call_polish(text: str, preceding: str, smc: str) -> str:
+        result = call_ollama(
+            base_url=args.ollama_url,
+            model=args.model,
+            text=text,
+            temperature=args.temperature,
+            num_ctx=args.num_ctx,
+            timeout=args.timeout,
+            retries=args.retries,
+            keep_alive=getattr(args, "keep_alive", "30m"),
+            prompt_profile=prompt_profile,
+            genre=genre,
+            char_map=char_map,
+            preceding_context=preceding,
+            story_memory_context=smc,
+            session=session,
+            no_think=True,
+        )
+        result = apply_story_memory_replacements(result, story_memory)
+        result = clean_for_audiobook_tts(result)
+        return format_reader_polished_content(result, {})
+
+    def _retry_with_sub_chunks(chunk: str, preceding: str, label: str) -> str:
+        """Tách chunk thành 2 nửa nhỏ hơn và retry từng nửa."""
+        mid = len(chunk) // 2
+        split_pos = chunk.rfind("\n\n", 0, mid)
+        if split_pos < 80:
+            split_pos = chunk.rfind("\n", 0, mid)
+        if split_pos < 50:
+            split_pos = mid
+        sub_chunks = [s.strip() for s in [chunk[:split_pos], chunk[split_pos:]] if s.strip()]
+        parts: list[str] = []
+        sub_preceding = preceding
+        for si, sub in enumerate(sub_chunks, 1):
+            print(f"  [{label}] retry sub-chunk {si}/{len(sub_chunks)} ({len(sub)} chars)")
+            sub_smc = build_story_memory_prompt(
+                story_memory,
+                f"{sub_preceding}\n\n{sub}".strip(),
+                genre=genre,
+            )
+            sub_polished = _call_polish(sub, sub_preceding, sub_smc)
+            if has_editorial_noise(sub_polished) or output_too_short(sub, sub_polished, min_ratio):
+                print(f"  [{label}] sub-chunk {si} still bad; using raw sub-chunk")
+                parts.append(sub)
+            else:
+                parts.append(sub_polished)
+            sub_preceding = _tail_context(parts[-1])
+        return "\n\n".join(parts)
 
     polished_chunks: list[str] = []
     preceding_context = ""
     with requests.Session() as session:
         for idx, chunk in enumerate(chunks, start=1):
             print(f"[{idx}/{len(chunks)}] Polish {len(chunk)} chars" + (f" +ctx={len(preceding_context)}c" if preceding_context else ""))
-            polished = call_ollama(
-                base_url=args.ollama_url,
-                model=args.model,
-                text=chunk,
-                temperature=args.temperature,
-                num_ctx=args.num_ctx,
-                timeout=args.timeout,
-                retries=args.retries,
-                keep_alive=getattr(args, "keep_alive", "30m"),
-                prompt_profile=prompt_profile,
+            story_memory_context = build_story_memory_prompt(
+                story_memory,
+                f"{preceding_context}\n\n{chunk}".strip(),
                 genre=genre,
-                char_map=char_map,
-                preceding_context=preceding_context,
-                session=session,
             )
-            polished = clean_for_audiobook_tts(polished)
-            polished = format_reader_polished_content(polished, {})
+            polished = _call_polish(chunk, preceding_context, story_memory_context)
             if has_editorial_noise(polished):
-                print(f"[WARN] Polish chunk {idx} có editorial noise; fallback clean-only chunk.")
-                polished = chunk
-            elif output_too_short(chunk, polished, getattr(args, "min_output_ratio", 0.70)):
-                print(f"[WARN] Polish chunk {idx} ngắn bất thường; fallback clean-only chunk.")
-                polished = chunk
+                print(f"[WARN] Polish chunk {idx} có editorial noise; retry với sub-chunks.")
+                polished = _retry_with_sub_chunks(chunk, preceding_context, f"{idx}/{len(chunks)}")
+            elif output_too_short(chunk, polished, min_ratio):
+                print(f"[WARN] Polish chunk {idx} ngắn bất thường; retry với sub-chunks.")
+                polished = _retry_with_sub_chunks(chunk, preceding_context, f"{idx}/{len(chunks)}")
             polished_chunks.append(polished)
             # Cập nhật preceding context từ kết quả vừa polish
             preceding_context = _tail_context(polished)
 
     final_text = "\n\n".join(polished_chunks)
+    final_text = apply_story_memory_replacements(final_text, story_memory)
     final_text = clean_for_audiobook_tts(final_text)
     final_text = format_reader_polished_content(final_text, {})
 
@@ -739,6 +849,15 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
         for issue in issues:
             print(f"  - {issue}")
     warn_addressing_quality(final_text, input_path.name)
+    memory_issues = find_story_memory_quality_issues(final_text, story_memory, genre=genre)
+    if memory_issues:
+        print(f"[STORY_MEMORY WARN] {input_path.name}: {len(memory_issues)} issue(s)")
+        for issue in memory_issues[:12]:
+            print(f"  - {issue}")
+        if len(memory_issues) > 12:
+            print(f"  - ... {len(memory_issues) - 12} more")
+        if getattr(args, "fail_on_story_memory_issues", False):
+            raise RuntimeError(f"Story memory QA failed for {input_path.name}: {memory_issues[:5]}")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(final_text.strip() + "\n", encoding="utf-8")
@@ -781,7 +900,7 @@ def main() -> None:
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
-    parser.add_argument("--model", default="qwen3:8b")
+    parser.add_argument("--model", default="qwen3:14b")
     parser.add_argument("--temperature", type=float, default=0.25)
     parser.add_argument("--num-ctx", type=int, default=6144)
     parser.add_argument("--timeout", type=int, default=300)
@@ -806,6 +925,19 @@ def main() -> None:
             "Đường dẫn file nhân vật (character map) chứa thông tin giọng nói, giới tính, xưng hô từng nhân vật. "
             "Sẽ được inject vào system prompt. Ví dụ: story_data/char_maps/21180-vinh-thoai-hiep-si.txt"
         ),
+    )
+    parser.add_argument(
+        "--story-memory-dir",
+        default="",
+        help=(
+            "Root story memory hoặc thư mục memory cụ thể. Nếu bỏ trống, script tự tìm theo "
+            "story_data/story_memory/{story_id}-{slug} từ story id/char-map/tên folder input."
+        ),
+    )
+    parser.add_argument(
+        "--fail-on-story-memory-issues",
+        action="store_true",
+        help="Nếu story memory QA phát hiện lỗi tên/thuật ngữ/register, dừng thay vì chỉ cảnh báo.",
     )
     parser.add_argument(
         "--prompt-profile",

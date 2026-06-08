@@ -182,7 +182,7 @@ def main() -> None:
     parser.add_argument("--polish-with-ollama", action="store_true")
     parser.add_argument("--polish-output-root", default="story_data/polished")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
-    parser.add_argument("--polish-model", default="translategemma:12b")
+    parser.add_argument("--polish-model", default="qwen3:14b")
     parser.add_argument("--polish-temperature", type=float, default=0.25)
     parser.add_argument("--polish-num-ctx", type=int, default=8192)
     parser.add_argument("--polish-timeout", type=int, default=300)
@@ -191,7 +191,7 @@ def main() -> None:
     parser.add_argument("--char-map-file", default="", help="Override character map file; mặc định tự tìm theo story slug/DB story id.")
     parser.add_argument("--emit-polish-job", action="store_true")
     parser.add_argument("--db-polish-output-root", default="story_data/polished")
-    parser.add_argument("--db-polish-model", default="qwen3:8b")
+    parser.add_argument("--db-polish-model", default="qwen3:14b")
     parser.add_argument("--db-polish-max-attempts", type=int, default=3)
     args = parser.parse_args()
 

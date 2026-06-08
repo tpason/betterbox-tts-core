@@ -24,8 +24,19 @@ while true; do
     --once \
     --ollama-url "${OLLAMA_URL:-http://host.docker.internal:11434}" \
     --vi-model "${POLISH_VI_MODEL:-qwen3:14b}" \
-    --translate-model "${POLISH_TRANSLATE_MODEL:-translategemma:12b}" \
-    --post-translate "${POLISH_POST_TRANSLATE:-polish}"
+    --translate-model "${POLISH_TRANSLATE_MODEL:-qwen3:14b}" \
+    --post-translate "${POLISH_POST_TRANSLATE:-polish}" \
+    --char-map-text-source "${POLISH_CHAR_MAP_TEXT_SOURCE:-auto}" \
+    --char-map-min-frequency "${POLISH_CHAR_MAP_MIN_FREQUENCY:-1}" \
+    --char-map-create-cooldown "${POLISH_CHAR_MAP_CREATE_COOLDOWN:-30}"
+
+  if [ -n "${POLISH_STORY_MEMORY_DIR:-}" ]; then
+    set -- "$@" --story-memory-dir "${POLISH_STORY_MEMORY_DIR}"
+  fi
+
+  if [ "${POLISH_FAIL_ON_STORY_MEMORY_ISSUES:-0}" = "1" ]; then
+    set -- "$@" --fail-on-story-memory-issues
+  fi
 
   if [ -n "${POLISH_SOURCE_CODES:-}" ]; then
     for source_code in ${POLISH_SOURCE_CODES}; do

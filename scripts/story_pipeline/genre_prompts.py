@@ -373,6 +373,29 @@ _TRANSLATE_GENRE_ADDENDUM_EN: dict[str, str] = {
 }
 
 
+_GENRE_HEADER_LINES: dict[str, str] = {
+    GENRE_WESTERN_FANTASY: "## Thể loại: Fantasy kiểu Korean light novel / Fantasy phương Tây — tên Tây, không cổ phong Hán Việt, không ngươi/mi",
+    GENRE_TIEN_HIEP: "## Thể loại: Tiên hiệp / Tu tiên / Xianxia",
+    GENRE_HUYEN_HUYEN: "## Thể loại: Huyền huyễn / Fantasy đa thế giới",
+    GENRE_HE_THONG: "## Thể loại: Hệ thống / System fiction / LitRPG",
+    GENRE_KIEM_HIEP: "## Thể loại: Kiếm hiệp / Võ hiệp / Wuxia — giang hồ, bang phái",
+    GENRE_DO_THI: "## Thể loại: Đô thị / Hiện đại — không cổ phong",
+    GENRE_XUYEN_KHONG: "## Thể loại: Xuyên không / Trọng sinh / Isekai",
+    GENRE_MAT_THE: "## Thể loại: Mạt thế / Tận thế / Apocalypse",
+    GENRE_VONG_DU: "## Thể loại: Võng du / VRMMO",
+    GENRE_LANG_MAN: "## Thể loại: Lãng mạn / Ngôn tình / Romance",
+}
+
+
+def genre_header_line(genre: str) -> str:
+    """Trả về dòng ## Thể loại: ... để inject vào đầu char_map mới tạo.
+
+    Dùng các từ khóa mà infer_genre_from_char_map() có thể detect lại,
+    đảm bảo genre được nhận ra khi không có DB category.
+    """
+    return _GENRE_HEADER_LINES.get(genre, "")
+
+
 def get_polish_genre_addendum(genre: str) -> str:
     """Return genre-specific text to append to polish system prompt. Empty → no change."""
     return _POLISH_GENRE_ADDENDUM.get(genre, "").strip()
@@ -602,6 +625,92 @@ def _extract_char_entries(char_map: str) -> str:
         if in_char_block:
             result.append(line)
     return "\n".join(result).strip()
+
+
+def _split_char_entries(char_entries: str) -> list[str]:
+    entries: list[str] = []
+    current: list[str] = []
+    for line in char_entries.splitlines():
+        if line.strip().startswith("### ") and current:
+            entries.append("\n".join(current).strip())
+            current = [line]
+        elif line.strip().startswith("### "):
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        entries.append("\n".join(current).strip())
+    return [entry for entry in entries if entry]
+
+
+def _entry_surfaces(entry: str) -> list[str]:
+    surfaces: list[str] = []
+    lines = entry.splitlines()
+    if lines and lines[0].strip().startswith("### "):
+        surfaces.append(lines[0].strip()[4:].strip())
+    for line in lines:
+        stripped = line.strip()
+        lower = stripped.lower()
+        if lower.startswith("- tên khác:"):
+            value = stripped.split(":", 1)[-1]
+            surfaces.extend(part.strip() for part in value.split(",") if part.strip())
+        elif lower.startswith("- danh hiệu/chức vụ:"):
+            value = stripped.split(":", 1)[-1].strip()
+            if value:
+                surfaces.append(value)
+    return [surface for surface in dict.fromkeys(surfaces) if surface]
+
+
+def _entry_is_priority(entry: str) -> bool:
+    lower = entry.casefold()
+    return (
+        "nhân vật chính" in lower
+        or "main character" in lower
+        or "priority" in lower
+        or "vai trò: chính" in lower
+    )
+
+
+def filter_char_map_for_text(char_map: str, text: str, max_entries: int = 20) -> str:
+    """Keep story-level rules and only character entries relevant to the current chunk."""
+    if not char_map:
+        return ""
+    story_voice = _extract_story_voice_section(char_map)
+    char_entries = _split_char_entries(_extract_char_entries(char_map))
+    if not char_entries:
+        return char_map
+
+    text_key = (text or "").casefold()
+    selected: list[str] = []
+    priority: list[str] = []
+    for entry in char_entries:
+        if _entry_is_priority(entry):
+            priority.append(entry)
+        surfaces = [surface.casefold() for surface in _entry_surfaces(entry)]
+        if any(surface and surface in text_key for surface in surfaces):
+            selected.append(entry)
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for entry in [*selected, *priority]:
+        key = entry.splitlines()[0].casefold() if entry.splitlines() else entry.casefold()
+        if key not in seen:
+            seen.add(key)
+            merged.append(entry)
+        if len(merged) >= max_entries:
+            break
+
+    if not merged:
+        merged = priority[: max(1, min(4, max_entries))]
+    if not merged:
+        merged = char_entries[: min(4, max_entries)]
+
+    parts: list[str] = []
+    if story_voice:
+        parts.append(story_voice)
+    if merged:
+        parts.append("\n\n".join(merged))
+    return "\n\n---\n\n".join(part for part in parts if part.strip()).strip()
 
 
 def inject_char_map_into_system(base_system: str, char_map: str) -> str:

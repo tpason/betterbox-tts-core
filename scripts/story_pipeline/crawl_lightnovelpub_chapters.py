@@ -494,7 +494,8 @@ def download_chapters_to_db(story: dict[str, Any], catalog: dict[str, Any], args
         number = int(chapter.get("number") or index)
         raw_path = chapter_path(Path(args.raw_en_output_root), slug, number)
         title = chapter.get("title") or f"Chapter {number}"
-        if raw_path.exists() and not args.overwrite:
+        no_write = getattr(args, "no_write_files", False)
+        if raw_path.exists() and not args.overwrite and not no_write:
             content = raw_path.read_text(encoding="utf-8")
             db_chapter = repo.upsert_chapter(
                 story["id"],
@@ -537,25 +538,26 @@ def download_chapters_to_db(story: dict[str, Any], catalog: dict[str, Any], args
                 if page_title:
                     title = page_title
             text = f"{title}\n\n{content}".strip() + "\n"
-            write_if_needed(raw_path, text, args.overwrite)
-            db_chapter = repo.upsert_chapter(
-                story["id"],
-                {
-                    "source_chapter_id": str(chapter.get("source_chapter_id") or number),
-                    "chapter_number": number,
-                    "title": title,
-                    "source_url": chapter.get("url") or "",
-                    "raw_language": "en",
-                    "raw_text_path": raw_path.as_posix(),
-                    "raw_text_content": text,
-                    "is_downloaded": True,
-                },
-            )
+            chapter_payload: dict[str, Any] = {
+                "source_chapter_id": str(chapter.get("source_chapter_id") or number),
+                "chapter_number": number,
+                "title": title,
+                "source_url": chapter.get("url") or "",
+                "raw_language": "en",
+                "raw_text_content": text,
+                "is_downloaded": True,
+            }
+            if no_write:
+                print(f"[TEXT] db-only {slug}/chapter{number:04d}: {len(text)} chars")
+            else:
+                write_if_needed(raw_path, text, args.overwrite)
+                chapter_payload["raw_text_path"] = raw_path.as_posix()
+                print(f"[TEXT] saved {slug}/chapter{number:04d}: {raw_path}")
+            db_chapter = repo.upsert_chapter(story["id"], chapter_payload)
             saved += 1
             if args.enqueue_polish:
                 enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, raw_path=raw_path, args=args)
                 jobs += 1
-            print(f"[TEXT] saved {slug}/chapter{number:04d}: {raw_path}")
         except Exception as exc:
             failed += 1
             print(f"[WARN] lightnovelpub chapter failed {chapter.get('url')}: {type(exc).__name__}: {exc}")
@@ -594,10 +596,11 @@ def main() -> None:
     parser.add_argument("--min-text-chars", type=int, default=80)
     parser.add_argument("--chapter-delay", type=float, default=1.5)
     parser.add_argument("--stop-on-error", action="store_true")
+    parser.add_argument("--no-write-files", action="store_true", help="Chỉ lưu text vào DB (raw_text_content), không ghi file ra disk.")
     parser.add_argument("--enqueue-polish", action="store_true", help="Sau khi tải raw text, enqueue job dịch/polish sang tiếng Việt.")
     parser.add_argument("--polished-output-root", default="story_data/polished")
     parser.add_argument("--translated-output-root", default="story_data/translated")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--polish-max-attempts", type=int, default=3)
     parser.add_argument(
         "--post-translate",

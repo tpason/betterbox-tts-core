@@ -54,7 +54,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from story_db.story_pipeline_db import repository as repo
 from story_db.story_pipeline_db.db import connect
-from genre_prompts import find_char_map_file
+from genre_prompts import find_char_map_file, genre_header_line
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -91,12 +91,15 @@ def fetch_chapters(
     story_id: str = "",
     from_chapter: int = 0,
     to_chapter: int = 0,
-    use_polished: bool = True,
+    text_source: str = "polished",
 ) -> list[dict[str, Any]]:
+    text_source = text_source if text_source in {"raw", "translated", "polished"} else "polished"
     query = """
         SELECT
             c.id AS chapter_id,
             c.chapter_number,
+            c.raw_text_content,
+            c.raw_text_path,
             c.polished_text_content,
             c.polished_text_path,
             c.translated_text_content,
@@ -125,10 +128,12 @@ def fetch_chapters(
         query += " AND c.chapter_number <= %(to_chapter)s"
         params["to_chapter"] = to_chapter
 
-    if use_polished:
-        query += " AND (c.polished_text_content IS NOT NULL OR c.polished_text_path IS NOT NULL)"
-    else:
+    if text_source == "raw":
+        query += " AND (c.raw_text_content IS NOT NULL OR c.raw_text_path IS NOT NULL)"
+    elif text_source == "translated":
         query += " AND (c.translated_text_content IS NOT NULL OR c.translated_text_path IS NOT NULL)"
+    else:
+        query += " AND (c.polished_text_content IS NOT NULL OR c.polished_text_path IS NOT NULL)"
 
     query += " ORDER BY c.chapter_number"
 
@@ -137,13 +142,17 @@ def fetch_chapters(
         return [dict(row) for row in rows]
 
 
-def get_chapter_text(row: dict[str, Any], use_polished: bool = True) -> str:
-    if use_polished:
-        content = row.get("polished_text_content") or ""
-        path_str = row.get("polished_text_path") or ""
-    else:
+def get_chapter_text(row: dict[str, Any], text_source: str = "polished") -> str:
+    text_source = text_source if text_source in {"raw", "translated", "polished"} else "polished"
+    if text_source == "raw":
+        content = row.get("raw_text_content") or ""
+        path_str = row.get("raw_text_path") or ""
+    elif text_source == "translated":
         content = row.get("translated_text_content") or ""
         path_str = row.get("translated_text_path") or ""
+    else:
+        content = row.get("polished_text_content") or ""
+        path_str = row.get("polished_text_path") or ""
 
     if content and len(content) > 100:
         return content
@@ -173,8 +182,11 @@ def story_slug_from_row(row: dict[str, Any]) -> str:
 
 # ── Pass 1: Local name extraction ──────────────────────────────────────────────
 
-# Tên phương Tây: từ bắt đầu bằng chữ hoa, 3+ ký tự, chỉ chứa chữ cái
-_WESTERN_NAME_RE = re.compile(r'\b([A-Z][a-zA-Z]{2,})\b')
+# Tên riêng Latin/Vietnamese: 1-4 từ viết hoa. Heuristic này vẫn được LLM lọc lại ở pass 2.
+_PROPER_NAME_RE = re.compile(
+    r"\b([A-ZÀ-ỴĐ][a-zA-ZÀ-ỹĐđ'’-]{2,}(?:\s+[A-ZÀ-ỴĐ][a-zA-ZÀ-ỹĐđ'’-]{1,}){0,3})\b",
+    re.UNICODE,
+)
 
 # Tên xuất hiện sau dấu hiệu dialogue attribution (tiếng Việt)
 _DIALOGUE_SPEAKER_RE = re.compile(
@@ -208,7 +220,7 @@ def _get_context_snippet(text: str, name: str) -> str:
 
 def pass1_scan(
     rows: list[dict[str, Any]],
-    use_polished: bool = True,
+    text_source: str = "polished",
     min_frequency: int = DEFAULT_MIN_FREQUENCY,
 ) -> dict[str, CandidateInfo]:
     candidates: dict[str, CandidateInfo] = {}
@@ -216,15 +228,15 @@ def pass1_scan(
     print(f"[PASS1] Scanning {len(rows)} chapters locally...")
     for row in rows:
         ch_num = int(row["chapter_number"])
-        text = get_chapter_text(row, use_polished=use_polished)
+        text = get_chapter_text(row, text_source=text_source)
         if not text or len(text) < 100:
             continue
 
         names_found: set[str] = set()
 
-        for m in _WESTERN_NAME_RE.finditer(text):
+        for m in _PROPER_NAME_RE.finditer(text):
             name = m.group(1)
-            if name not in _EXCLUDE_WORDS and len(name) >= 3:
+            if name not in _EXCLUDE_WORDS and name.split()[0] not in _EXCLUDE_WORDS and len(name) >= 3:
                 names_found.add(name)
 
         for m in _DIALOGUE_SPEAKER_RE.finditer(text):
@@ -278,6 +290,12 @@ Trả về JSON array chỉ gồm nhân vật thực sự:
     "gender": "nam" | "nữ" | "không rõ",
     "pronoun_3rd": "đại từ ngôi 3 phù hợp (anh ta / cô ta / hắn / nàng / cậu ta / ...)",
     "self_address": "cách tự xưng trong lời thoại (tôi / ta / tôi / mình / ...)",
+    "addressing_others": "cách nhân vật gọi người khác theo nhóm: đồng đội/cấp trên/cấp dưới/dân thường/kẻ thù/trẻ nhỏ",
+    "relative_status": "tuổi/vị thế/quyền lực tương đối nếu suy ra được",
+    "relationships": ["cặp quan hệ cụ thể có bằng chứng, ví dụ: A -> B: bạn/cấp dưới/thù địch, xưng tôi/cậu hoặc mày/tên kia"],
+    "addressing_by_target": ["A -> B: xưng hô cụ thể nếu thấy hoặc suy ra chắc từ context"],
+    "forbidden_pronouns": ["xưng hô không nên dùng cho nhân vật này nếu có bằng chứng"],
+    "title_terms": ["danh hiệu/chức vụ/biệt danh quan trọng và cách dịch nên giữ"],
     "personality": "2-4 từ mô tả tính cách nổi bật",
     "speech_style": "1-2 câu mô tả cách nói đặc trưng",
     "role": "nhân vật chính / đồng đội / phản diện / phụ",
@@ -287,6 +305,12 @@ Trả về JSON array chỉ gồm nhân vật thực sự:
 ]
 
 Nếu không có nhân vật nào trong danh sách → trả về []
+
+Ưu tiên thông tin giúp dịch/polish tiếng Việt tự nhiên:
+- Ai lớn/nhỏ tuổi hơn, cấp trên/cấp dưới, vua/tướng/lính/dân thường.
+- Nhân vật A gọi nhân vật B thế nào ở riêng tư và công khai.
+- Kẻ thù/người lạ không được dùng "bạn/anh/cậu" lịch sự nếu cảnh đang thù địch.
+- Không tự ý cổ phong hóa nếu bối cảnh không phải tiên hiệp/cổ trang.
 
 ---
 Danh sách ứng viên:
@@ -482,6 +506,18 @@ def parse_existing_char_map(content: str) -> dict[str, dict[str, Any]]:
             current["pronoun_3rd"] = value
         elif lower.startswith("tự xưng:"):
             current["self_address"] = value
+        elif lower.startswith("cách gọi người khác:") or lower.startswith("gọi người khác:"):
+            current["addressing_others"] = value
+        elif lower.startswith("tuổi/vị thế:") or lower.startswith("vị thế:"):
+            current["relative_status"] = value
+        elif lower.startswith("quan hệ:"):
+            current.setdefault("relationships", []).append(value)
+        elif lower.startswith("xưng hô theo đối tượng:"):
+            current.setdefault("addressing_by_target", []).append(value)
+        elif lower.startswith("xưng hô cấm:"):
+            current.setdefault("forbidden_pronouns", []).append(value)
+        elif lower.startswith("danh hiệu/chức vụ:"):
+            current.setdefault("title_terms", []).append(value)
         elif lower.startswith("tính cách:"):
             current["personality"] = value
         elif lower.startswith(("giọng nói:", "giọng thoại:")):
@@ -541,9 +577,35 @@ def _merge_new_into_existing(
             if merged_al:
                 result[matched_key]["aliases"] = [a.title() for a in merged_al]
             # Fill missing fields only (don't overwrite manual entries)
-            for field in ("gender", "pronoun_3rd", "self_address", "personality", "speech_style", "role"):
+            for field in (
+                "gender",
+                "pronoun_3rd",
+                "self_address",
+                "addressing_others",
+                "relative_status",
+                "personality",
+                "speech_style",
+                "role",
+            ):
                 if not ex.get(field) and char.get(field):
                     result[matched_key][field] = char[field]
+            for field in ("relationships", "addressing_by_target", "forbidden_pronouns", "title_terms"):
+                old_items = ex.get(field) or []
+                if isinstance(old_items, str):
+                    old_items = [old_items]
+                new_items = char.get(field) or []
+                if isinstance(new_items, str):
+                    new_items = [new_items]
+                merged_items: list[str] = []
+                seen_items: set[str] = set()
+                for item in [*old_items, *new_items]:
+                    text = str(item).strip()
+                    key_item = text.casefold()
+                    if text and key_item not in seen_items:
+                        seen_items.add(key_item)
+                        merged_items.append(text)
+                if merged_items:
+                    result[matched_key][field] = merged_items
             # Update chapter tracking
             for field in ("first_seen_chapter", "last_seen_chapter"):
                 new_val = char.get(field)
@@ -560,6 +622,67 @@ def _merge_new_into_existing(
             truly_new.append(char)
 
     return result, truly_new
+
+
+def _text_list(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()]
+
+
+def _find_existing_char_key(existing: dict[str, dict[str, Any]], char: dict[str, Any]) -> str:
+    name = (char.get("name") or "").strip()
+    if not name:
+        return ""
+    key = _normalize(name)
+    aliases_new = {_normalize(a) for a in (char.get("aliases") or [])}
+    all_new = {key, *aliases_new}
+    for ex_key, ex_char in existing.items():
+        all_ex = {ex_key, *(_normalize(a) for a in (ex_char.get("aliases") or []))}
+        if all_ex & all_new:
+            return ex_key
+    return ""
+
+
+def _collect_append_updates(
+    existing: dict[str, dict[str, Any]],
+    new_chars: list[dict[str, Any]],
+) -> list[tuple[str, list[str]]]:
+    updates: list[tuple[str, list[str]]] = []
+    scalar_fields = (
+        ("addressing_others", "Cập nhật cách gọi người khác"),
+        ("relative_status", "Cập nhật tuổi/vị thế"),
+    )
+    list_fields = (
+        ("relationships", "Quan hệ"),
+        ("addressing_by_target", "Xưng hô theo đối tượng"),
+        ("forbidden_pronouns", "Xưng hô cấm"),
+        ("title_terms", "Danh hiệu/chức vụ"),
+    )
+
+    for char in new_chars:
+        ex_key = _find_existing_char_key(existing, char)
+        if not ex_key:
+            continue
+        ex = existing[ex_key]
+        lines: list[str] = []
+        for field, label in scalar_fields:
+            new_text = str(char.get(field) or "").strip()
+            old_text = str(ex.get(field) or "").strip()
+            if new_text and new_text.casefold() != old_text.casefold():
+                lines.append(f"- {label}: {new_text}")
+        for field, label in list_fields:
+            old_items = {item.casefold() for item in _text_list(ex.get(field))}
+            for item in _text_list(char.get(field)):
+                if item.casefold() not in old_items:
+                    lines.append(f"- {label}: {item}")
+        if lines:
+            updates.append((ex.get("name") or char.get("name") or ex_key.title(), lines))
+    return updates
 
 
 def _render_char_entry(char: dict[str, Any]) -> list[str]:
@@ -580,6 +703,28 @@ def _render_char_entry(char: dict[str, Any]) -> list[str]:
     self_addr = char.get("self_address", "")
     if self_addr:
         lines.append(f"- Tự xưng: {self_addr}")
+    addressing = char.get("addressing_others", "")
+    if addressing:
+        lines.append(f"- Cách gọi người khác: {addressing}")
+    status = char.get("relative_status", "")
+    if status:
+        lines.append(f"- Tuổi/vị thế: {status}")
+    for relationship in char.get("relationships") or []:
+        relationship = str(relationship).strip()
+        if relationship:
+            lines.append(f"- Quan hệ: {relationship}")
+    for rule in char.get("addressing_by_target") or []:
+        rule = str(rule).strip()
+        if rule:
+            lines.append(f"- Xưng hô theo đối tượng: {rule}")
+    for rule in char.get("forbidden_pronouns") or []:
+        rule = str(rule).strip()
+        if rule:
+            lines.append(f"- Xưng hô cấm: {rule}")
+    for term in char.get("title_terms") or []:
+        term = str(term).strip()
+        if term:
+            lines.append(f"- Danh hiệu/chức vụ: {term}")
     personality = char.get("personality", "")
     if personality:
         lines.append(f"- Tính cách: {personality}")
@@ -608,14 +753,23 @@ def format_full_char_map(
     story_id: str,
     chapter_range: str,
     existing_content: str = "",
+    genre: str = "",
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d")
     lines: list[str] = [
         f"## Truyện: {story_title} ({story_id})",
         f"## Cập nhật: {now} từ chapters {chapter_range}",
         "## Auto-generated bởi build_char_map_from_story.py — chỉnh sửa thủ công để tinh chỉnh",
-        "",
     ]
+    # Preserve existing genre header; fall back to injecting from genre arg
+    _existing_genre_match = re.search(r"^(##\s*Thể loại[^\n]*)", existing_content or "", re.MULTILINE)
+    if _existing_genre_match:
+        lines.append(_existing_genre_match.group(1))
+    elif genre:
+        _genre_line = genre_header_line(genre)
+        if _genre_line:
+            lines.append(_genre_line)
+    lines.append("")
 
     # Giữ lại ALIASES block từ file cũ
     alias_block = _extract_alias_block(existing_content) if existing_content else ""
@@ -647,20 +801,39 @@ def format_full_char_map(
 def format_append_new_chars(
     existing_content: str,
     new_chars: list[dict[str, Any]],
+    existing_chars: dict[str, dict[str, Any]],
     chapter_range: str,
 ) -> str:
-    if not new_chars:
+    updates = _collect_append_updates(existing_chars, new_chars)
+    truly_new = [
+        char for char in new_chars
+        if not _find_existing_char_key(existing_chars, char)
+    ]
+    if not truly_new and not updates:
         return existing_content.rstrip() + "\n"
     now = datetime.now().strftime("%Y-%m-%d")
     lines: list[str] = [
         existing_content.rstrip(),
-        "",
-        f"## Auto Update: nhân vật mới (chapters {chapter_range}) — {now}",
-        "",
     ]
-    for char in new_chars:
-        lines.extend(_render_char_entry(char))
-        lines.append("")
+    if truly_new:
+        lines += [
+            "",
+            f"## Auto Update: nhân vật mới (chapters {chapter_range}) — {now}",
+            "",
+        ]
+        for char in truly_new:
+            lines.extend(_render_char_entry(char))
+            lines.append("")
+    if updates:
+        lines += [
+            "",
+            f"## Auto Update: quan hệ/xưng hô (chapters {chapter_range}) — {now}",
+            "",
+        ]
+        for name, update_lines in updates:
+            lines.append(f"### {name}")
+            lines.extend(update_lines)
+            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -675,6 +848,29 @@ def unload_ollama_model(base_url: str, model: str) -> None:
         )
     except Exception:
         pass
+
+
+def update_char_map_metadata(
+    story_id: str,
+    out_path: Path,
+    chapter_nums: list[int],
+    text_source: str,
+) -> None:
+    if not chapter_nums:
+        return
+    try:
+        metadata: dict[str, Any] = {
+            "char_map_path": out_path.relative_to(ROOT).as_posix(),
+            "char_map_updated_to_chapter": chapter_nums[-1],
+            "char_map_scanned_from_chapter": chapter_nums[0],
+            "char_map_scanned_to_chapter": chapter_nums[-1],
+            "char_map_scanned_chapters": len(chapter_nums),
+            "char_map_text_source": text_source,
+            "char_map_updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        repo.update_story_metadata(story_id, metadata)
+    except Exception as exc:
+        print(f"[DB WARN] Không cập nhật metadata: {exc}")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -692,7 +888,13 @@ def main() -> None:
     parser.add_argument(
         "--use-translated",
         action="store_true",
-        help="Dùng translated text thay vì polished text.",
+        help="Dùng translated text thay vì polished text. Tương đương --text-source translated.",
+    )
+    parser.add_argument(
+        "--text-source",
+        choices=("raw", "translated", "polished"),
+        default="polished",
+        help="Nguồn text để build char-map. Auto-worker dùng raw cho truyện Việt, translated cho truyện dịch.",
     )
     parser.add_argument(
         "--append-only",
@@ -712,6 +914,16 @@ def main() -> None:
         help=f"Số candidates gửi Ollama mỗi batch. Mặc định: {DEFAULT_BATCH_SIZE}",
     )
     parser.add_argument("--output-file", default="")
+    parser.add_argument(
+        "--genre",
+        default="",
+        help=(
+            "Thể loại để inject vào header char_map khi tạo mới: "
+            "western_fantasy, tien_hiep, huyen_huyen, he_thong, kiem_hiep, "
+            "do_thi, xuyen_khong, mat_the, vong_du, lang_man. "
+            "Bỏ trống nếu file cũ đã có dòng Thể loại."
+        ),
+    )
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default="qwen3:14b")
     parser.add_argument("--temperature", type=float, default=0.1)
@@ -730,13 +942,15 @@ def main() -> None:
     if not args.story_title and not args.story_id:
         parser.error("Cần --story-title hoặc --story-id")
 
+    text_source = "translated" if args.use_translated else args.text_source
+
     print("[QUERY] Lấy chapters từ DB...")
     rows = fetch_chapters(
         story_title=args.story_title,
         story_id=args.story_id,
         from_chapter=args.from_chapter,
         to_chapter=args.to_chapter,
-        use_polished=not args.use_translated,
+        text_source=text_source,
     )
 
     if not rows:
@@ -751,7 +965,7 @@ def main() -> None:
 
     print(
         f"[INFO] {story_title} ({story_id}) — {len(rows)} chapters "
-        f"({chapter_range}), slug={slug}"
+        f"({chapter_range}), slug={slug}, text_source={text_source}"
     )
 
     # Output path
@@ -769,7 +983,7 @@ def main() -> None:
         print(f"[EXIST] {out_path} — {len(existing_chars)} nhân vật đã có")
 
     # ── Pass 1 ────────────────────────────────────────────────────────────────
-    candidates = pass1_scan(rows, use_polished=not args.use_translated, min_frequency=args.min_frequency)
+    candidates = pass1_scan(rows, text_source=text_source, min_frequency=args.min_frequency)
 
     if args.pass1_only or args.dry_run:
         print(f"\n[PASS1 TOP CANDIDATES]")
@@ -781,18 +995,8 @@ def main() -> None:
 
     if not candidates:
         print("[WARN] Không tìm được candidate nào.")
-        return
-
-    # Nếu append_only: bỏ qua names đã có trong map
-    if args.append_only and existing_chars:
-        existing_name_set: set[str] = set(existing_chars.keys())
-        for ch in existing_chars.values():
-            existing_name_set.update(_normalize(a) for a in (ch.get("aliases") or []))
-        candidates = {k: v for k, v in candidates.items() if _normalize(k) not in existing_name_set}
-        print(f"[FILTER] Sau khi loại existing: {len(candidates)} candidates mới cần xử lý")
-
-    if not candidates:
-        print("[INFO] Không có candidate mới cần xử lý.")
+        if existing_content:
+            update_char_map_metadata(story_id, out_path, chapter_nums, text_source)
         return
 
     # ── Pass 2 ────────────────────────────────────────────────────────────────
@@ -815,13 +1019,16 @@ def main() -> None:
 
     if not new_chars:
         print("[WARN] LLM không xác định được nhân vật nào.")
+        if existing_content:
+            update_char_map_metadata(story_id, out_path, chapter_nums, text_source)
         return
 
     # Format & write
     if args.append_only and existing_content:
-        _updated, truly_new = _merge_new_into_existing(existing_chars, new_chars)
-        output_content = format_append_new_chars(existing_content, truly_new, chapter_range)
-        print(f"[APPEND] {len(truly_new)} nhân vật mới thêm vào map")
+        output_content = format_append_new_chars(existing_content, new_chars, existing_chars, chapter_range)
+        appended_new = len([char for char in new_chars if not _find_existing_char_key(existing_chars, char)])
+        appended_updates = len(_collect_append_updates(existing_chars, new_chars))
+        print(f"[APPEND] new_chars={appended_new} relationship_updates={appended_updates}")
     else:
         merged, _ = _merge_new_into_existing(existing_chars, new_chars)
         output_content = format_full_char_map(
@@ -830,22 +1037,13 @@ def main() -> None:
             story_id=story_id,
             chapter_range=chapter_range,
             existing_content=existing_content,
+            genre=getattr(args, "genre", ""),
         )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(output_content, encoding="utf-8")
 
-    try:
-        repo.update_story_metadata(
-            story_id,
-            {
-                "char_map_path": out_path.relative_to(ROOT).as_posix(),
-                "char_map_updated_to_chapter": chapter_nums[-1],
-                "char_map_updated_at": datetime.now().isoformat(timespec="seconds"),
-            },
-        )
-    except Exception as exc:
-        print(f"[DB WARN] Không cập nhật metadata: {exc}")
+    update_char_map_metadata(story_id, out_path, chapter_nums, text_source)
 
     print(f"[SAVED] {out_path}")
     print(f"\nDùng lệnh tiếp theo:")

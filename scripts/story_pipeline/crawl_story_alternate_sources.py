@@ -620,6 +620,10 @@ def build_polish_worker_args(args: argparse.Namespace) -> SimpleNamespace:
         prompt_profile=args.prompt_profile,
         polish_mode=args.polish_mode,
         post_translate=args.post_translate,
+        char_map_text_source=getattr(args, "char_map_text_source", "auto"),
+        char_map_min_frequency=getattr(args, "char_map_min_frequency", 1),
+        story_memory_dir=getattr(args, "story_memory_dir", ""),
+        fail_on_story_memory_issues=getattr(args, "fail_on_story_memory_issues", False),
         min_output_ratio=args.min_output_ratio,
         polish_max_chars_per_chunk=args.polish_max_chars_per_chunk,
         translate_max_chars_per_chunk=args.translate_max_chars_per_chunk,
@@ -878,7 +882,7 @@ def main() -> None:
     parser.add_argument("--polished-output-root", default="story_data/polished")
     parser.add_argument("--translated-output-root", default="story_data/translated")
     parser.add_argument("--vi-model", default="qwen3:14b")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--polish-max-attempts", type=int, default=3)
     parser.add_argument(
         "--polish-inline",
@@ -894,6 +898,18 @@ def main() -> None:
     parser.add_argument("--keep-alive", default="24h")
     parser.add_argument("--prompt-profile", choices=("fast", "full"), default="full")
     parser.add_argument("--polish-mode", choices=("llm", "clean"), default="llm")
+    parser.add_argument("--char-map-text-source", choices=("auto", "raw", "translated", "polished"), default="auto")
+    parser.add_argument("--char-map-min-frequency", type=int, default=1)
+    parser.add_argument(
+        "--story-memory-dir",
+        default="",
+        help="Root story memory hoặc thư mục memory cụ thể; mặc định tự dò story_data/story_memory/{story_id}-{slug}.",
+    )
+    parser.add_argument(
+        "--fail-on-story-memory-issues",
+        action="store_true",
+        help="Fail inline polish/translate khi QA phát hiện lỗi tên riêng, biệt danh, xưng hô hoặc glossary.",
+    )
     parser.add_argument(
         "--post-translate",
         choices=("polish", "copy"),

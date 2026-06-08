@@ -48,16 +48,22 @@ def main() -> None:
         return
 
     for row in rows:
-        polished_path = Path(row["polished_text_path"])
-        if not polished_path.exists():
-            print(f"[SKIP] missing polished file: {polished_path}")
-            continue
-        story_slug = polished_path.parent.name
-        output_path = Path(args.audio_output_root) / story_slug / f"{polished_path.stem}.wav"
+        raw_polished_path = row.get("polished_text_path")
+        polished_path = Path(raw_polished_path) if raw_polished_path else None
+        if polished_path and polished_path.exists():
+            story_slug = polished_path.parent.name
+            chapter_stem = polished_path.stem
+        else:
+            # File không còn trên disk — dùng metadata từ DB
+            story_slug = row.get("story_metadata", {}).get("slug") or str(row["story_id"])
+            chapter_stem = f"chapter{row['chapter_number']:04d}"
+
+        output_path = Path(args.audio_output_root) / story_slug / f"{chapter_stem}.wav"
         if args.dry_run:
+            src = raw_polished_path if (polished_path and polished_path.exists()) else "db"
             print(
                 f"[DRY] {row['source_code']} | {row['story_title']} | "
-                f"chapter{row['chapter_number']:04d} -> {output_path}"
+                f"chapter{row['chapter_number']:04d} [{src}] -> {output_path}"
             )
             continue
         job = repo.enqueue_chapter_job(
@@ -65,12 +71,12 @@ def main() -> None:
             row["id"],
             story_id=row["story_id"],
             source_code=row["source_code"],
-            input_path=polished_path.as_posix(),
+            input_path=raw_polished_path or "",
             output_path=output_path.as_posix(),
             payload={
                 "story_slug": story_slug,
                 "chapter_number": row["chapter_number"],
-                "polished_text_path": polished_path.as_posix(),
+                "polished_text_path": raw_polished_path,
             },
             max_attempts=args.max_attempts,
         )

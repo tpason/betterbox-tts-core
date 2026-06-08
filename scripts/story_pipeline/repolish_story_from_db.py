@@ -87,7 +87,12 @@ def story_slug_from_row(row: dict[str, Any]) -> str:
     return slug or "story"
 
 
-def build_model_args(args: argparse.Namespace, genre: str = "") -> argparse.Namespace:
+def build_model_args(
+    args: argparse.Namespace,
+    genre: str = "",
+    story_id: str = "",
+    story_slug_value: str = "",
+) -> argparse.Namespace:
     ns = argparse.Namespace(
         ollama_url=args.ollama_url,
         model=args.vi_model,
@@ -101,7 +106,11 @@ def build_model_args(args: argparse.Namespace, genre: str = "") -> argparse.Name
         polish_mode=args.polish_mode,
         min_output_ratio=args.min_output_ratio,
         genre=genre,
+        story_id=story_id or str(getattr(args, "story_id", "") or ""),
+        story_slug=story_slug_value or str(getattr(args, "story_slug", "") or ""),
         char_map_file=getattr(args, "char_map_file", ""),
+        story_memory_dir=getattr(args, "story_memory_dir", ""),
+        fail_on_story_memory_issues=getattr(args, "fail_on_story_memory_issues", False),
     )
     return ns
 
@@ -163,27 +172,32 @@ def ensure_char_map_for_story(
         return existing
 
     model = getattr(args, "char_map_model", "") or args.vi_model
+    configured_source = str(getattr(args, "char_map_text_source", "auto") or "auto").strip().lower()
+    if configured_source in {"raw", "translated", "polished"}:
+        text_source = configured_source
+    else:
+        text_source = "raw" if args.source_vi else "translated"
     base_cmd = [
         sys.executable,
-        str(SCRIPT_DIR / "extract_char_map.py"),
+        str(SCRIPT_DIR / "build_char_map_from_story.py"),
         "--story-id",
         story_id,
+        "--text-source",
+        text_source,
         "--ollama-url",
         args.ollama_url,
         "--model",
         model,
         "--timeout",
         str(getattr(args, "char_map_timeout", 180)),
-        "--sample-chapters",
-        str(getattr(args, "char_map_sample_chapters", 30)),
+        "--min-frequency",
+        str(max(1, int(getattr(args, "char_map_min_frequency", 1) or 1))),
     ]
-    if not args.source_vi:
-        base_cmd.append("--use-translated")
 
     if not existing:
         log(
             f"[CHAR_MAP] missing story_id={story_id} slug={slug}; "
-            f"auto-create before polish (sample={args.char_map_sample_chapters}, model={model})"
+            f"auto-create before polish (text_source={text_source}, model={model})"
         )
         if _run_char_map_extract(base_cmd):
             refreshed = find_char_map_file(story_id=story_id, slug=slug)
@@ -193,7 +207,11 @@ def ensure_char_map_for_story(
         log("[CHAR_MAP WARN] continue polishing without char map")
         return ""
 
-    updated_to = _metadata_int(row.get("story_metadata"), "char_map_updated_to_chapter")
+    updated_to = (
+        _metadata_int(row.get("story_metadata"), "char_map_updated_to_chapter")
+        or _metadata_int(row.get("story_metadata"), "char_map_scanned_to_chapter")
+        or _metadata_int(row.get("story_metadata"), "char_map_sampled_to_chapter")
+    )
     interval = int(getattr(args, "char_map_update_interval", 150) or 0)
     if updated_to and interval > 0 and max_chapter >= updated_to + interval:
         update_cmd = base_cmd + [
@@ -367,7 +385,7 @@ def process_row(row: dict[str, Any], args: argparse.Namespace, *, index: int, to
         if genre:
             log(f"[GENRE] {genre}")
 
-        model_args = build_model_args(args, genre)
+        model_args = build_model_args(args, genre, story_id=story_id, story_slug_value=slug)
         model_args.char_map_file = effective_char_map
         polish_file(input_path, output_path, model_args)
 
@@ -459,6 +477,19 @@ def main() -> None:
         ),
     )
     model_group.add_argument(
+        "--story-memory-dir",
+        default="",
+        help=(
+            "Root story memory hoặc thư mục memory cụ thể. Nếu bỏ trống, script tự tìm theo "
+            "story_data/story_memory/{story_id}-{slug}."
+        ),
+    )
+    model_group.add_argument(
+        "--fail-on-story-memory-issues",
+        action="store_true",
+        help="Nếu story memory QA phát hiện lỗi tên/thuật ngữ/register, fail chapter thay vì chỉ cảnh báo.",
+    )
+    model_group.add_argument(
         "--no-auto-char-map",
         action="store_true",
         help="Không tự tạo/cập nhật character map khi thiếu hoặc stale.",
@@ -473,12 +504,24 @@ def main() -> None:
         "--char-map-sample-chapters",
         type=int,
         default=30,
-        help="Số chapter sample khi tự tạo/cập nhật char map.",
+        help="Legacy no-op: giữ để tương thích CLI cũ.",
+    )
+    model_group.add_argument(
+        "--char-map-text-source",
+        choices=("auto", "raw", "translated", "polished"),
+        default="auto",
+        help="Nguồn text để auto build char-map. auto=raw khi --source-vi, translated cho truyện dịch.",
+    )
+    model_group.add_argument(
+        "--char-map-min-frequency",
+        type=int,
+        default=1,
+        help="Tần suất tối thiểu để candidate name được gửi vào LLM khi build char-map.",
     )
     model_group.add_argument(
         "--char-map-model",
         default="",
-        help="Model dùng riêng để extract char map. Mặc định dùng --vi-model để tránh load thêm model khác.",
+        help="Model dùng riêng để build char map. Mặc định dùng --vi-model để tránh load thêm model khác.",
     )
     model_group.add_argument(
         "--char-map-timeout",

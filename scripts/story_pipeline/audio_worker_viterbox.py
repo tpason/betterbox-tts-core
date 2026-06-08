@@ -5,6 +5,7 @@ import argparse
 import fcntl
 import socket
 import sys
+import tempfile
 import time
 from argparse import Namespace
 from pathlib import Path
@@ -87,11 +88,29 @@ def build_tts_args(args: argparse.Namespace) -> Namespace:
     )
 
 
+def resolve_input_text(job: dict) -> tuple[Path, bool]:
+    """Return (input_path, is_temp). If is_temp=True, caller must delete the file after use."""
+    input_path = Path(job["input_path"]) if job.get("input_path") else None
+    if input_path and input_path.exists():
+        return input_path, False
+
+    content = repo.get_chapter_polished_content(job["chapter_id"])
+    if not content:
+        raise FileNotFoundError(
+            f"Polished content missing for chapter_id={job['chapter_id']}: "
+            f"file not found at {input_path} and no DB content"
+        )
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", encoding="utf-8", delete=False
+    )
+    tmp.write(content)
+    tmp.close()
+    print(f"[TMP] wrote polished content from DB -> {tmp.name}")
+    return Path(tmp.name), True
+
+
 def process_job(job: dict, model: Viterbox, args: argparse.Namespace) -> None:
-    input_path = Path(job["input_path"])
     output_path = Path(job["output_path"])
-    if not input_path.exists():
-        raise FileNotFoundError(f"Polished file not found: {input_path}")
 
     if output_path.exists() and not args.overwrite:
         repo.update_chapter_audio_output(job["chapter_id"], audio_path=output_path.as_posix())
@@ -99,8 +118,14 @@ def process_job(job: dict, model: Viterbox, args: argparse.Namespace) -> None:
         print(f"[SKIP] audio exists: {output_path}")
         return
 
-    wait_for_gpu(args)
-    synthesize_chapter(model, input_path, output_path, build_tts_args(args))
+    input_path, is_temp = resolve_input_text(job)
+    try:
+        wait_for_gpu(args)
+        synthesize_chapter(model, input_path, output_path, build_tts_args(args))
+    finally:
+        if is_temp:
+            input_path.unlink(missing_ok=True)
+
     repo.update_chapter_audio_output(job["chapter_id"], audio_path=output_path.as_posix())
     repo.complete_story_job(job["id"], result_payload={"audio_path": output_path.as_posix()})
     print(f"[DONE] audio_chapter {job['id']} -> {output_path}")
@@ -154,6 +179,10 @@ def main() -> None:
     reference_audio = Path(args.reference_audio)
     if not reference_audio.exists():
         raise SystemExit(f"Không tìm thấy reference audio: {reference_audio}")
+
+    stale_reset = repo.reset_stale_running_jobs("audio_chapter", stale_after_minutes=240)
+    if stale_reset:
+        print(f"[STARTUP] reset {stale_reset} stale running audio jobs back to pending")
 
     print(f"worker={args.worker_id}, device={args.device}, reference={reference_audio}")
     lock_handle = acquire_gpu_lock(Path(args.gpu_lock_path)) if args.device == "cuda" else None

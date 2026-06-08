@@ -1,0 +1,50 @@
+name: Claude Auto-Fix Review Feedback
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  autofix:
+    if: |
+      github.event.review.state == 'changes_requested' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.review.user.login, 'claude')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    concurrency:
+      group: claude-autofix-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout pull request branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+
+      - name: Ask Claude to fix review feedback
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            A reviewer requested changes on this pull request.
+
+            Review the PR diff, review body, and all review comments. Fix only actionable issues that are clearly related to this PR. Keep the patch scoped and avoid unrelated refactors.
+
+            If the requested change is ambiguous or unsafe, leave a PR comment explaining what information is needed instead of guessing.
+
+            Repository rules:
+            - This is the BetterBox-TTS core repository.
+            - Do not commit secrets, generated models, local audio, local database files, or internal agent notes.
+            - If feedback is about story_reader, explain that it belongs in the separate story-reader repository.
+          claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 10

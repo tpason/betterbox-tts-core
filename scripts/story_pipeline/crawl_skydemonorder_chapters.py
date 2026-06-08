@@ -500,7 +500,7 @@ def main() -> None:
     parser.add_argument("--translated-output-root", default="story_data/translated")
     parser.add_argument("--polished-output-root", default="story_data/polished")
     parser.add_argument("--vi-model", default="qwen3:14b")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--story-model", default="", help="Model riêng cho title/description; mặc định dùng --translate-model.")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--temperature", type=float, default=0.2)

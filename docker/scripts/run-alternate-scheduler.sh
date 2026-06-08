@@ -21,9 +21,11 @@ while true; do
     --chapter-delay "${ALTERNATE_CHAPTER_DELAY:-1.5}" \
     --post-translate "${ALTERNATE_POST_TRANSLATE:-copy}" \
     --alias-inference "${ALTERNATE_ALIAS_INFERENCE:-heuristic}" \
-    --alias-model "${ALTERNATE_ALIAS_MODEL:-translategemma:12b}" \
+    --alias-model "${ALTERNATE_ALIAS_MODEL:-qwen3:8b}" \
     --alias-timeout "${ALTERNATE_ALIAS_TIMEOUT:-120}" \
     --translate-check-timeout "${ALTERNATE_TRANSLATE_CHECK_TIMEOUT:-3}" \
+    --char-map-text-source "${ALTERNATE_CHAR_MAP_TEXT_SOURCE:-auto}" \
+    --char-map-min-frequency "${ALTERNATE_CHAR_MAP_MIN_FREQUENCY:-1}" \
     --ollama-url "${OLLAMA_URL:-http://host.docker.internal:11434}"
 
   if [ -n "${ALTERNATE_TARGET_SOURCES:-}" ]; then
@@ -48,6 +50,14 @@ while true; do
 
   if [ "${ALTERNATE_POLISH_INLINE:-0}" = "1" ]; then
     set -- "$@" --polish-inline
+  fi
+
+  if [ -n "${ALTERNATE_STORY_MEMORY_DIR:-}" ]; then
+    set -- "$@" --story-memory-dir "${ALTERNATE_STORY_MEMORY_DIR}"
+  fi
+
+  if [ "${ALTERNATE_FAIL_ON_STORY_MEMORY_ISSUES:-0}" = "1" ]; then
+    set -- "$@" --fail-on-story-memory-issues
   fi
 
   if [ "${ALTERNATE_REQUEUE_DONE:-0}" = "1" ]; then

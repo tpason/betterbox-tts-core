@@ -551,7 +551,7 @@ def main() -> None:
     parser.add_argument("--catalog-output-root", default="story_data/catalogs")
     parser.add_argument("--translated-output-root", default="story_data/translated")
     parser.add_argument("--polished-output-root", default="story_data/polished")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--polish-max-attempts", type=int, default=3)
     parser.add_argument("--post-translate", choices=("polish", "copy"), default="copy")
     args = parser.parse_args()

@@ -5,6 +5,7 @@ import argparse
 import re
 import socket
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -408,7 +409,7 @@ def list_translation_candidates(args: argparse.Namespace) -> list[dict[str, Any]
         JOIN sources src ON src.id = s.source_id
         WHERE s.is_active = TRUE
           AND c.is_downloaded = TRUE
-          AND c.raw_text_path IS NOT NULL
+          AND (c.raw_text_path IS NOT NULL OR c.raw_text_content IS NOT NULL)
           AND (
                 lower(COALESCE(NULLIF(c.raw_language, ''), NULLIF(s.language, ''), '')) <> ALL((%(vi_codes)s)::text[])
                 OR src.code = ANY((%(non_vi_sources)s)::text[])
@@ -471,6 +472,8 @@ def build_model_args(
     max_chars: int,
     char_map_file: str = "",
     genre: str = "",
+    story_id: str = "",
+    story_slug_value: str = "",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         ollama_url=args.ollama_url,
@@ -485,14 +488,20 @@ def build_model_args(
         polish_mode=args.polish_mode,
         min_output_ratio=args.min_output_ratio,
         genre=genre or getattr(args, "genre", ""),
+        story_id=story_id or str(getattr(args, "story_id", "") or ""),
+        story_slug=story_slug_value
+        or str(getattr(args, "story_slug", "") or getattr(args, "target_slug", "") or ""),
         char_map_file=char_map_file or getattr(args, "char_map_file", ""),
+        story_memory_dir=getattr(args, "story_memory_dir", ""),
+        fail_on_story_memory_issues=getattr(args, "fail_on_story_memory_issues", False),
     )
 
 
 def enqueue_job(row: dict[str, Any], args: argparse.Namespace, reason: str) -> dict[str, Any]:
     slug = story_slug(row)
-    raw_path = Path(row["raw_text_path"])
-    polished_path = Path(args.polished_output_root) / slug / raw_path.name
+    chapter_num = int(row.get("chapter_number") or 0)
+    chapter_stem = Path(row["raw_text_path"]).stem if row.get("raw_text_path") else f"chapter{chapter_num:04d}"
+    polished_path = Path(args.polished_output_root) / slug / f"{chapter_stem}.txt"
     raw_language = likely_raw_language(row)
     char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
         story_id=str(row.get("story_id") or ""),
@@ -510,14 +519,14 @@ def enqueue_job(row: dict[str, Any], args: argparse.Namespace, reason: str) -> d
         story_id=row["story_id"],
         source_code=row["source_code"],
         model=args.translate_model,
-        input_path=row["raw_text_path"],
+        input_path=row.get("raw_text_path") or "",
         output_path=polished_path.as_posix(),
         payload={
             "raw_language": raw_language,
             "story_slug": slug,
             "chapter_number": row["chapter_number"],
-            "chapter_title": row.get("chapter_title") or raw_path.stem,
-            "source_chapter_title": row.get("chapter_title") or raw_path.stem,
+            "chapter_title": row.get("chapter_title") or chapter_stem,
+            "source_chapter_title": row.get("chapter_title") or chapter_stem,
             "translate_story_metadata": True,
             "source_story_title": row.get("story_original_title") or row.get("story_title") or "",
             "source_story_author": (row.get("story_metadata") or {}).get("source_author")
@@ -574,7 +583,8 @@ def select_rows(args: argparse.Namespace) -> list[tuple[dict[str, Any], str]]:
             skipped_not_needed += 1
             continue
         raw_path = resolve_project_path(row.get("raw_text_path"))
-        if args.require_input_file and (not raw_path or not raw_path.exists()):
+        has_db_content = bool(row.get("raw_text_content"))
+        if args.require_input_file and (not raw_path or not raw_path.exists()) and not has_db_content:
             skipped_missing_file += 1
             log(f"[SKIP] missing raw file chapter={row['chapter_id']} path={row.get('raw_text_path')}")
             continue
@@ -670,6 +680,135 @@ def translate_story_metadata_for_rows(rows: list[tuple[dict[str, Any], str]], ar
     log(f"[STORY] metadata summary stories={len(seen)} updated={updated} skipped={skipped}")
 
 
+def _resolve_raw_input(row: dict[str, Any]) -> tuple[Path, "tempfile.NamedTemporaryFile | None"]:
+    """Return (path_to_raw_text, temp_file_or_None). Falls back to raw_text_content in DB."""
+    raw_path = resolve_project_path(row.get("raw_text_path"))
+    if raw_path and raw_path.exists():
+        return raw_path, None
+    content = row.get("raw_text_content") or ""
+    if not content:
+        raise FileNotFoundError(
+            f"Input file not found and no raw_text_content in DB: {row.get('raw_text_path')!r}"
+        )
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".txt",
+        prefix=f"translate_in_{int(row.get('chapter_number') or 0):04d}_",
+        delete=False,
+    )
+    tmp.write(content)
+    tmp.flush()
+    log(f"[TMP] input from DB -> {tmp.name}")
+    return Path(tmp.name), tmp
+
+
+
+def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Namespace, *, index: int, total: int) -> bool:
+    """Translate inline rồi enqueue polish_chapter job (raw_language=vi) cho polish_worker xử lý riêng."""
+    started = time.monotonic()
+    slug = story_slug(row)
+    label = f"[{index}/{total}] {row['source_code']} {slug} chapter{int(row['chapter_number']):04d} reason={reason}"
+    _tmp_in = None
+    try:
+        chapter_num = int(row.get("chapter_number") or 0)
+        stable_name = Path(row["raw_text_path"]).name if row.get("raw_text_path") else f"chapter{chapter_num:04d}.txt"
+        raw_path, _tmp_in = _resolve_raw_input(row)
+        translated_path = Path(args.translated_output_root) / slug / stable_name
+        polished_path = Path(args.polished_output_root) / slug / stable_name
+        raw_language = likely_raw_language(row)
+        char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
+            story_id=str(row.get("story_id") or ""),
+            slug=slug,
+        )
+        genre = getattr(args, "genre", "") or resolve_genre_from_context(
+            str(row.get("story_category") or ""),
+            raw_language=raw_language,
+            source_code=str(row.get("source_code") or ""),
+            char_map_file=char_map_file,
+        )
+        if char_map_file:
+            log(f"[CHAR_MAP] {char_map_file}")
+
+        if translated_path.exists() and not args.overwrite_translation:
+            log(f"[SKIP] translated output exists: {translated_path}")
+        else:
+            log(f"[TRANSLATE] start {label} model={args.translate_model} max_chars={args.translate_max_chars_per_chunk}")
+            translate_file(
+                raw_path,
+                translated_path,
+                build_model_args(
+                    args,
+                    args.translate_model,
+                    args.translate_max_chars_per_chunk,
+                    char_map_file,
+                    genre,
+                    story_id=str(row.get("story_id") or ""),
+                    story_slug_value=slug,
+                ),
+            )
+            log(f"[TRANSLATE] done {label} output={translated_path}")
+
+        fake_job = {"chapter_id": row["chapter_id"], "story_id": row["story_id"]}
+        translated_text_content = read_formatted_output(translated_path, fake_job, write_back=True, label="translated")
+        translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
+        if translated_chapter_title:
+            log(f"[DB] chapter title translated {label}: {translated_chapter_title}")
+
+        repo.update_chapter_text_outputs(
+            row["chapter_id"],
+            translated_text_path=translated_path.as_posix(),
+            translated_text_content=translated_text_content,
+        )
+
+        polish_job = repo.enqueue_chapter_job(
+            "polish_chapter",
+            row["chapter_id"],
+            story_id=row["story_id"],
+            source_code=row["source_code"],
+            model=args.vi_model,
+            input_path=translated_path.as_posix(),
+            output_path=polished_path.as_posix(),
+            payload={
+                "raw_language": "vi",
+                "translated_text_path": translated_path.as_posix(),
+                "story_slug": slug,
+                "chapter_number": row["chapter_number"],
+                "chapter_title": row.get("chapter_title") or Path(stable_name).stem,
+                "genre": genre,
+                "char_map_file": char_map_file,
+            },
+            max_attempts=args.max_attempts,
+        )
+        if args.force_requeue_done and polish_job.get("status") == "done":
+            with connect() as conn:
+                updated = conn.execute(
+                    """
+                    UPDATE story_jobs SET status='pending', attempts=0, run_after=now(),
+                        locked_by=NULL, locked_at=NULL, finished_at=NULL, last_error=NULL, updated_at=now()
+                    WHERE id=%s RETURNING *
+                    """,
+                    (polish_job["id"],),
+                ).fetchone()
+                if updated is not None:
+                    polish_job = dict(updated)
+                    log(f"[JOB] force requeued job={polish_job.get('id')} status={polish_job.get('status')}")
+
+        elapsed = time.monotonic() - started
+        log(f"[DONE] {label} polish_job={polish_job.get('id')} status={polish_job.get('status')} elapsed={elapsed:.1f}s")
+        return True
+    except Exception as exc:
+        elapsed = time.monotonic() - started
+        log(f"[ERROR] {label} elapsed={elapsed:.1f}s {type(exc).__name__}: {exc}")
+        if args.stop_on_error:
+            raise
+        return False
+    finally:
+        if _tmp_in is not None:
+            try:
+                import os; os.unlink(_tmp_in.name)
+            except OSError:
+                pass
+
+
 def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, index: int, total: int) -> bool:
     started = time.monotonic()
     slug = story_slug(row)
@@ -680,6 +819,8 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
             f"translated={row.get('translated_text_path') or '-'} polished={row.get('polished_text_path') or '-'}"
         )
         return True
+    if args.post_translate == "queue":
+        return _process_row_queue_mode(row, reason, args, index=index, total=total)
     # Resolve genre before enqueuing so it can be logged with the job.
     _raw_language = likely_raw_language(row)
     _char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
@@ -695,12 +836,13 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
 
     job = enqueue_job(row, args, reason)
     log(f"[START] {label} job={job.get('id')} genre={effective_genre or '(default)'}")
+    _tmp_in = None
     try:
-        raw_path = resolve_project_path(row.get("raw_text_path"))
-        if raw_path is None or not raw_path.exists():
-            raise FileNotFoundError(f"Input file not found: {row.get('raw_text_path')}")
+        chapter_num = int(row.get("chapter_number") or 0)
+        stable_name = Path(row["raw_text_path"]).name if row.get("raw_text_path") else f"chapter{chapter_num:04d}.txt"
+        raw_path, _tmp_in = _resolve_raw_input(row)
         output_path = Path(job["output_path"])
-        translated_path = Path(args.translated_output_root) / story_slug(row) / raw_path.name
+        translated_path = Path(args.translated_output_root) / story_slug(row) / stable_name
         effective_char_map = (job.get("payload") or {}).get("char_map_file") or getattr(args, "char_map_file", "") or find_char_map_file(
             story_id=str(row.get("story_id") or ""),
             slug=slug,
@@ -720,7 +862,15 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
             translate_file(
                 raw_path,
                 translated_path,
-                build_model_args(args, args.translate_model, args.translate_max_chars_per_chunk, effective_char_map, effective_genre),
+                build_model_args(
+                    args,
+                    args.translate_model,
+                    args.translate_max_chars_per_chunk,
+                    effective_char_map,
+                    effective_genre,
+                    story_id=str(row.get("story_id") or ""),
+                    story_slug_value=slug,
+                ),
             )
             log(f"[TRANSLATE] done {label} output={translated_path}")
         log(f"[FORMAT] translated start {label}")
@@ -753,7 +903,15 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
             polish_file(
                 translated_path,
                 output_path,
-                build_model_args(args, args.vi_model, args.polish_max_chars_per_chunk, effective_char_map, effective_genre),
+                build_model_args(
+                    args,
+                    args.vi_model,
+                    args.polish_max_chars_per_chunk,
+                    effective_char_map,
+                    effective_genre,
+                    story_id=str(row.get("story_id") or ""),
+                    story_slug_value=slug,
+                ),
             )
             log(f"[POLISH] done {label} output={output_path}")
             log(f"[FORMAT] polished start {label}")
@@ -789,6 +947,12 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
         if args.stop_on_error:
             raise
         return False
+    finally:
+        if _tmp_in is not None:
+            try:
+                import os; os.unlink(_tmp_in.name)
+            except OSError:
+                pass
 
 
 def main() -> None:
@@ -817,7 +981,7 @@ def main() -> None:
     parser.add_argument("--polished-output-root", default="story_data/polished")
     parser.add_argument("--translated-output-root", default="story_data/translated")
     parser.add_argument("--vi-model", default="qwen3:14b")
-    parser.add_argument("--translate-model", default="translategemma:12b")
+    parser.add_argument("--translate-model", default="qwen3:14b")
     parser.add_argument("--story-model", default="", help="Model dịch title/description story. Mặc định dùng --translate-model.")
     parser.add_argument(
         "--translate-story-metadata",
@@ -848,9 +1012,12 @@ def main() -> None:
     parser.add_argument("--polish-mode", choices=("llm", "clean"), default="llm")
     parser.add_argument(
         "--post-translate",
-        choices=("polish", "copy"),
-        default="copy",
-        help="Sau khi dịch raw khác tiếng Việt: polish bằng LLM, hoặc copy bản dịch sang polished output.",
+        choices=("polish", "copy", "queue"),
+        default="queue",
+        help=(
+            "Sau khi dịch: queue=enqueue polish_chapter job cho polish_worker (mặc định); "
+            "polish=chạy LLM polish ngay inline; copy=copy bản dịch sang polished output."
+        ),
     )
     parser.add_argument("--polish-max-chars-per-chunk", type=int, default=5000)
     parser.add_argument("--translate-max-chars-per-chunk", type=int, default=2500)
@@ -875,6 +1042,19 @@ def main() -> None:
             "File nhân vật (character map) inject vào system prompt khi polish. "
             "VD: story_data/char_maps/21180-vinh-thoai-hiep-si.txt"
         ),
+    )
+    parser.add_argument(
+        "--story-memory-dir",
+        default="",
+        help=(
+            "Root story memory hoặc thư mục memory cụ thể. Nếu bỏ trống, script tự tìm theo "
+            "story_data/story_memory/{story_id}-{slug} từ char-map/story slug."
+        ),
+    )
+    parser.add_argument(
+        "--fail-on-story-memory-issues",
+        action="store_true",
+        help="Nếu story memory QA phát hiện lỗi tên/thuật ngữ/register, fail chapter thay vì chỉ cảnh báo.",
     )
     parser.add_argument("--worker-id", default=f"translate-db-{socket.gethostname()}")
     parser.add_argument(

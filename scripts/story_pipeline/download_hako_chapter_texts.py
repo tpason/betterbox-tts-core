@@ -263,7 +263,7 @@ def main() -> None:
     )
     parser.add_argument("--polish-output-root", default="story_data/polished")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
-    parser.add_argument("--polish-model", default="qwen3:8b")
+    parser.add_argument("--polish-model", default="qwen3:14b")
     parser.add_argument("--polish-temperature", type=float, default=0.25)
     parser.add_argument("--polish-num-ctx", type=int, default=8192)
     parser.add_argument("--polish-timeout", type=int, default=300)
@@ -276,7 +276,7 @@ def main() -> None:
         help="Only enqueue polish job in Postgres after saving raw chapter. Worker handles Ollama.",
     )
     parser.add_argument("--db-polish-output-root", default="story_data/polished")
-    parser.add_argument("--db-polish-model", default="qwen3:8b")
+    parser.add_argument("--db-polish-model", default="qwen3:14b")
     parser.add_argument("--db-polish-max-attempts", type=int, default=3)
     args = parser.parse_args()
 
