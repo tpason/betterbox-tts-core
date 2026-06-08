@@ -273,6 +273,7 @@ services:
       POLISH_INTERVAL_SECONDS: ${POLISH_INTERVAL_SECONDS:-30}
       POLISH_MIN_FREE_RAM_GB: ${POLISH_MIN_FREE_RAM_GB:-2.0}
       POLISH_MAX_CPU_PERCENT: ${POLISH_MAX_CPU_PERCENT:-80}
+      POLISH_NO_SAVE_FILES: ${POLISH_NO_SAVE_FILES:-1}
     extra_hosts: *host-gateway
     volumes:
       - .:/app

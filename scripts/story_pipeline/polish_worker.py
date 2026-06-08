@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import subprocess
 import sys
@@ -495,18 +496,20 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     input_path, input_is_temp = _resolve_input_for_polish(job)
     raw_output_path = job.get("output_path") or ""
     _tmp_out_dir: tempfile.TemporaryDirectory | None = None
-    if raw_output_path:
+    if getattr(args, "no_save_files", False) or not raw_output_path:
+        # DB-only mode: write to temp, save content to DB, discard files after.
+        _tmp_out_dir = tempfile.TemporaryDirectory(prefix="polish_out_")
+        _stem = Path(raw_output_path).name if raw_output_path else "chapter.txt"
+        output_path = Path(_tmp_out_dir.name) / _stem
+    else:
         output_path = Path(raw_output_path)
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
-            # Fallback to temp only when directory cannot be created (e.g. read-only mount)
+            # Fallback to temp when directory cannot be created (e.g. read-only mount)
             _tmp_out_dir = tempfile.TemporaryDirectory(prefix="polish_out_")
             output_path = Path(_tmp_out_dir.name) / output_path.name
             log(f"[WARN] cannot create output dir, using temp: {output_path}")
-    else:
-        _tmp_out_dir = tempfile.TemporaryDirectory(prefix="polish_out_")
-        output_path = Path(_tmp_out_dir.name) / "chapter.txt"
 
     maybe_translate_story_metadata(job, args)
 
@@ -617,7 +620,14 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         translate_model = job.get("model") or args.translate_model
         translate_max_chars = int(payload.get("translate_max_chars_per_chunk") or args.translate_max_chars_per_chunk)
         polish_max_chars = int(payload.get("polish_max_chars_per_chunk") or args.polish_max_chars_per_chunk)
-        translated_path = Path(args.translated_output_root) / story_slug_for_job(job, input_path) / output_path.name
+        no_save = getattr(args, "no_save_files", False)
+        if no_save:
+            _trans_tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8")
+            translated_path = Path(_trans_tmp.name)
+            _trans_tmp.close()
+        else:
+            translated_path = Path(args.translated_output_root) / story_slug_for_job(job, input_path) / output_path.name
+            translated_path.parent.mkdir(parents=True, exist_ok=True)
         _check_resources(args, label="translate")
         translate_file(
             input_path,
@@ -628,9 +638,11 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         translated_chapter_title = maybe_update_translated_chapter_title(job, translated_text_content)
         repo.update_chapter_text_outputs(
             job["chapter_id"],
-            translated_text_path=translated_path.as_posix(),
+            translated_text_path=None if no_save else translated_path.as_posix(),
             translated_text_content=translated_text_content,
         )
+        if no_save:
+            translated_path.unlink(missing_ok=True)
         effective_char_map = maybe_auto_update_char_map(
             job,
             args,
@@ -859,6 +871,12 @@ def main() -> None:
         help="Bỏ qua toàn bộ kiểm tra tài nguyên GPU/CPU/RAM.",
     )
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--no-save-files",
+        action="store_true",
+        default=bool(int(os.environ.get("POLISH_NO_SAVE_FILES", "0"))),
+        help="DB-only mode: write translated/polished output to temp, save content to DB, discard files.",
+    )
     args = parser.parse_args()
 
     if args.workers < 1:

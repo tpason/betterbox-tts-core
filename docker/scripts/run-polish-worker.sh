@@ -44,6 +44,10 @@ while true; do
     done
   fi
 
+  if [ "${POLISH_NO_SAVE_FILES:-1}" = "1" ]; then
+    set -- "$@" --no-save-files
+  fi
+
   "$@" || echo "[polish] batch failed; will retry after ${interval}s"
 
   echo "[polish] sleep ${interval}s"
