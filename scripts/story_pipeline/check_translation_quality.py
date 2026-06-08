@@ -201,22 +201,39 @@ def scan_story(
     return results
 
 
-def reset_polished_for_repolish(chapter_ids: list[str], dry_run: bool = True) -> int:
-    """Mark chapters as needing repolish: set is_polished=False."""
+def reset_polished_for_repolish(
+    chapter_ids: list[str], dry_run: bool = True, force_running: bool = False
+) -> int:
+    """
+    Mark chapters as needing repolish: set is_polished=False AND reset polish_chapter jobs
+    to pending (excluding running jobs by default to avoid races).
+    """
     if not chapter_ids:
         return 0
     if dry_run:
-        print(f"[DRY] Would reset is_polished=False for {len(chapter_ids)} chapters")
+        print(f"[DRY] Would reset is_polished=False + re-queue jobs for {len(chapter_ids)} chapters")
         return len(chapter_ids)
+    status_exclude = [] if force_running else ["running"]
     with connect() as conn:
         conn.execute(
             "UPDATE chapters SET is_polished = FALSE WHERE id = ANY(%(ids)s::uuid[])",
             {"ids": chapter_ids},
         )
+        conn.execute(
+            f"""
+            UPDATE story_jobs
+            SET status = 'pending', attempts = 0, run_after = now(),
+                locked_by = NULL, locked_at = NULL, last_error = NULL
+            WHERE job_type = 'polish_chapter'
+              AND chapter_id = ANY(%(ids)s::uuid[])
+              {"AND status NOT IN %(exclude)s" if status_exclude else ""}
+            """,
+            {"ids": chapter_ids, "exclude": tuple(status_exclude)} if status_exclude else {"ids": chapter_ids},
+        )
     return len(chapter_ids)
 
 
-def retranslate_bad_chapters(bad_rows: list[dict], dry_run: bool = True) -> int:
+def retranslate_bad_chapters(bad_rows: list[dict], dry_run: bool = True, force_running: bool = False) -> int:
     """
     Reset bad chapters for full re-translation + re-polish via the job queue.
     Steps:
@@ -233,7 +250,7 @@ def retranslate_bad_chapters(bad_rows: list[dict], dry_run: bool = True) -> int:
         return 0
 
     if dry_run:
-        print(f"[DRY] Would retranslate {len(chapter_ids)} chapters:")
+        print(f"[DRY] Would retranslate {len(chapter_ids)} chapters (force_running={force_running}):")
         for r in bad_rows:
             print(f"  ch{r['chapter_number']:04d} → delete polished file + reset DB flags + re-enqueue job")
         return len(chapter_ids)
@@ -259,19 +276,38 @@ def retranslate_bad_chapters(bad_rows: list[dict], dry_run: bool = True) -> int:
             """,
             {"ids": chapter_ids},
         )
-        # Step 3: Reset or re-enqueue job — force pending for existing jobs
+        # Step 3: Reset non-running jobs to pending (skip running by default to avoid races).
+        status_filter = "" if force_running else "AND status NOT IN ('running')"
         updated = conn.execute(
-            """
+            f"""
             UPDATE story_jobs
             SET status = 'pending', attempts = 0, run_after = now(),
                 locked_by = NULL, locked_at = NULL, last_error = NULL
             WHERE job_type = 'polish_chapter'
               AND chapter_id = ANY(%(ids)s::uuid[])
+              {status_filter}
             RETURNING chapter_id
             """,
             {"ids": chapter_ids},
         ).fetchall()
         updated_ids = {str(r["chapter_id"]) for r in updated}
+
+        # Warn about running jobs that were intentionally skipped.
+        if not force_running:
+            running = conn.execute(
+                """
+                SELECT chapter_id FROM story_jobs
+                WHERE job_type = 'polish_chapter'
+                  AND chapter_id = ANY(%(ids)s::uuid[])
+                  AND status = 'running'
+                """,
+                {"ids": chapter_ids},
+            ).fetchall()
+            if running:
+                skipped_ids = [str(r["chapter_id"]) for r in running]
+                print(f"[WARN] {len(skipped_ids)} chapter(s) are currently running — skipped to avoid races. "
+                      f"Re-run after workers finish, or use --force-running to override.")
+                chapter_ids = [cid for cid in chapter_ids if cid not in skipped_ids]
 
     # Step 4: For chapters with no existing job, insert new ones
     need_new_job = [r for r in bad_rows if r.get("chapter_id") and str(r["chapter_id"]) not in updated_ids]
@@ -346,6 +382,8 @@ def main() -> None:
                         help="Full re-translate: delete polished files, reset DB flags, re-enqueue jobs")
     parser.add_argument("--dry-run", action="store_true",
                         help="With --repolish-bad/--retranslate-bad: show what would happen without changing DB")
+    parser.add_argument("--force-running", action="store_true",
+                        help="Also reset currently-running jobs (risk of race; use only when workers are stopped)")
     parser.add_argument("--min-issues", type=int, default=1,
                         help="Min number of issues to flag a chapter (default: 1)")
     args = parser.parse_args()
@@ -400,16 +438,14 @@ def main() -> None:
         print(f"  ch{r['chapter_number']:04d}: {', '.join(r['issues'])}")
 
     if args.retranslate_bad:
-        n = retranslate_bad_chapters(bad, dry_run=args.dry_run)
+        n = retranslate_bad_chapters(bad, dry_run=args.dry_run, force_running=args.force_running)
         if not args.dry_run:
             print(f"\n[DONE] {n} chapters queued for re-translation via job queue.")
     elif args.repolish_bad:
         ids = [r["chapter_id"] for r in bad if r.get("chapter_id")]
-        n = reset_polished_for_repolish(ids, dry_run=args.dry_run)
+        n = reset_polished_for_repolish(ids, dry_run=args.dry_run, force_running=args.force_running)
         action = "Would reset" if args.dry_run else "Reset"
-        print(f"\n[REPOLISH] {action} is_polished=False cho {n} chapters → workers sẽ repolish")
-        if not args.dry_run:
-            print("  Restart polish workers để pick up các jobs mới.")
+        print(f"\n[REPOLISH] {action} is_polished=False + re-queued jobs cho {n} chapters → workers sẽ repolish")
 
 
 if __name__ == "__main__":
