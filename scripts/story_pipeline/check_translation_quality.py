@@ -63,6 +63,15 @@ def is_probably_vietnamese(text: str) -> bool:
 _WRONG_PRONOUN_GENRES = {"western_fantasy", "do_thi", "lang_man"}
 # Match "hắn/nàng/lão/y" as standalone words in narrative (outside quoted dialogue)
 _WRONG_PRONOUN_RE = re.compile(r"\b(hắn|nàng|lão|y)\b")
+# Compound nouns that legitimately contain lão/y — not pronoun usage
+# e.g. trưởng lão (elder), ông lão (old man), y tá (nurse), y học (medicine)
+_COMPOUND_NOUN_RE = re.compile(
+    r"\b(trưởng|ông|bà|cụ|già)\s+lão\b"
+    r"|\blão\s+(thành|làng|luyện|thực|thọ|giả|nhân|quái|tổ|tiền|tinh|hóa|hóa)\b"
+    r"|\by\s+(tá|học|phục|lệnh|khoa|sĩ|viện|thuật)\b"
+    r"|\b(nội|đông|đồng|trung)\s+y\b",
+    re.IGNORECASE | re.UNICODE,
+)
 # Detect large untranslated English blocks (80+ non-Vietnamese chars)
 _EN_BLOCK_RE = re.compile(r"[A-Za-z][A-Za-z ,\.'\-]{79,}")
 
@@ -89,10 +98,12 @@ def _count_wrong_pronouns(text: str) -> int:
     count = 0
     for line in text.splitlines():
         stripped = line.strip()
-        # Skip lines that are mostly dialogue (start with quote character)
-        if stripped.startswith(('"', "'", "“", "‘", "—")):
+        # Skip lines that are mostly dialogue (start with quote/bracket character)
+        if stripped.startswith(('"', "'", "\u201c", "\u2018", "\u2014", "[")):
             continue
-        count += len(_WRONG_PRONOUN_RE.findall(stripped))
+        # Remove compound nouns (trưởng lão, ông lão, y tá...) before counting
+        cleaned = _COMPOUND_NOUN_RE.sub(" ", stripped)
+        count += len(_WRONG_PRONOUN_RE.findall(cleaned))
     return count
 
 
@@ -367,6 +378,123 @@ def retranslate_bad_chapters(bad_rows: list[dict], dry_run: bool = True, force_r
     return len(chapter_ids)
 
 
+# ── Pronoun post-processing ──────────────────────────────────────────────────
+
+_DIALOGUE_STARTS = ('"', "'", "“", "‘", "—", "[")
+
+_PRONOUN_FIXES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bhắn\b"), "anh ta"),
+    (re.compile(r"\bnàng\b"), "cô ấy"),
+]
+_SAFE_PRONOUN_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
+    # standalone 'y' pronoun (he/him archaic) — skip compound nouns (y tá, y học...)
+    (re.compile(r"\by\b"), "anh ta"),
+    # standalone 'lão' pronoun (he/the old one) — skip compound nouns (trưởng lão, lão nhân...)
+    (re.compile(r"\blão\b"), "ông ta"),
+]
+
+
+def _replace_safe(line: str, pat: re.Pattern, replacement: str) -> tuple[str, int]:
+    """Replace pronoun pattern, skipping spans covered by _COMPOUND_NOUN_RE."""
+    compound_spans = [(m.start(), m.end()) for m in _COMPOUND_NOUN_RE.finditer(line)]
+    count = [0]
+    def replacer(m: re.Match) -> str:
+        if any(s <= m.start() < e for s, e in compound_spans):
+            return m.group(0)
+        count[0] += 1
+        return replacement
+    result = pat.sub(replacer, line)
+    return result, count[0]
+
+
+def _fix_pronouns_in_text(text: str) -> tuple[str, int]:
+    """Replace hắn→anh ta, nàng→cô ấy, y→anh ta, lão→ông ta in narrative lines only.
+    Skips dialogue lines and compound nouns (y tá, y học, ông lão, trưởng lão...).
+    Returns (new_text, n_replaced)."""
+    lines = text.splitlines(keepends=True)
+    total_replaced = 0
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(_DIALOGUE_STARTS):
+            result.append(line)
+            continue
+        new_line = line
+        for pat, replacement in _PRONOUN_FIXES:
+            new_line, n = pat.subn(replacement, new_line)
+            total_replaced += n
+        for pat, replacement in _SAFE_PRONOUN_REPLACEMENTS:
+            new_line, n = _replace_safe(new_line, pat, replacement)
+            total_replaced += n
+        result.append(new_line)
+    return "".join(result), total_replaced
+
+
+def fix_pronouns_in_db(
+    bad_rows: list[dict], dry_run: bool = True
+) -> int:
+    """
+    Post-process: replace hắn→anh ta, nàng→cô ấy in polished_text_content.
+    Safe for first-person stories where hắn/nàng always refer to secondary characters.
+    Also updates polished file on disk if it exists.
+    """
+    rows_with_pronoun = [
+        r for r in bad_rows
+        if any("wrong_pronoun" in issue for issue in r.get("issues", []))
+    ]
+    if not rows_with_pronoun:
+        print("[FIX-PRONOUNS] No chapters with wrong_pronoun issues.")
+        return 0
+
+    if dry_run:
+        print(f"[DRY] Would fix pronouns in {len(rows_with_pronoun)} chapters")
+        return len(rows_with_pronoun)
+
+    fixed = 0
+    with connect() as conn:
+        for row in rows_with_pronoun:
+            chapter_id = str(row.get("chapter_id") or "")
+            if not chapter_id:
+                continue
+            db_row = conn.execute(
+                "SELECT polished_text_content, polished_text_path FROM chapters WHERE id = %(id)s::uuid",
+                {"id": chapter_id},
+            ).fetchone()
+            if not db_row:
+                continue
+            text = db_row["polished_text_content"] or ""
+            if not text and db_row["polished_text_path"]:
+                p = Path(db_row["polished_text_path"])
+                if not p.is_absolute():
+                    p = ROOT / p
+                try:
+                    text = p.read_text(encoding="utf-8")
+                except OSError:
+                    pass
+            if not text:
+                print(f"  ch{row['chapter_number']:04d}: no content, skipping")
+                continue
+
+            new_text, n = _fix_pronouns_in_text(text)
+            if n == 0:
+                continue
+
+            conn.execute(
+                "UPDATE chapters SET polished_text_content = %(content)s WHERE id = %(id)s::uuid",
+                {"content": new_text, "id": chapter_id},
+            )
+            # Also fix on disk if file exists
+            p_path = db_row["polished_text_path"] or ""
+            if p_path:
+                p = Path(p_path) if Path(p_path).is_absolute() else ROOT / p_path
+                if p.exists():
+                    p.write_text(new_text, encoding="utf-8")
+            print(f"  ch{row['chapter_number']:04d}: replaced {n} pronoun(s)")
+            fixed += 1
+
+    return fixed
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -380,8 +508,12 @@ def main() -> None:
                         help="Mark chapters with issues as is_polished=False so workers reprocess")
     parser.add_argument("--retranslate-bad", action="store_true",
                         help="Full re-translate: delete polished files, reset DB flags, re-enqueue jobs")
+    parser.add_argument("--fix-pronouns", action="store_true",
+                        help="Post-process: replace hắn→anh ta, nàng→cô ấy in narrative lines (DB update)")
+    parser.add_argument("--issue-filter", default="",
+                        help="Comma-separated issue types to filter on (e.g. not_vietnamese,forbidden_term)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="With --repolish-bad/--retranslate-bad: show what would happen without changing DB")
+                        help="With --repolish-bad/--retranslate-bad/--fix-pronouns: show what would happen")
     parser.add_argument("--force-running", action="store_true",
                         help="Also reset currently-running jobs (risk of race; use only when workers are stopped)")
     parser.add_argument("--min-issues", type=int, default=1,
@@ -429,6 +561,14 @@ def main() -> None:
 
     bad = [r for r in bad if len(r["issues"]) >= args.min_issues]
 
+    # Apply --issue-filter if specified
+    issue_filter = [s.strip() for s in args.issue_filter.split(",") if s.strip()]
+    if issue_filter:
+        bad = [
+            r for r in bad
+            if any(any(f in issue for f in issue_filter) for issue in r["issues"])
+        ]
+
     if not bad:
         print("[OK] Không tìm thấy chapter nào có vấn đề.")
         return
@@ -437,7 +577,11 @@ def main() -> None:
     for r in bad:
         print(f"  ch{r['chapter_number']:04d}: {', '.join(r['issues'])}")
 
-    if args.retranslate_bad:
+    if args.fix_pronouns:
+        n = fix_pronouns_in_db(bad, dry_run=args.dry_run)
+        action = "Would fix" if args.dry_run else "Fixed"
+        print(f"\n[FIX-PRONOUNS] {action} pronouns in {n} chapters.")
+    elif args.retranslate_bad:
         n = retranslate_bad_chapters(bad, dry_run=args.dry_run, force_running=args.force_running)
         if not args.dry_run:
             print(f"\n[DONE] {n} chapters queued for re-translation via job queue.")
