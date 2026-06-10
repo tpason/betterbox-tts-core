@@ -24,6 +24,7 @@ from scripts.story_pipeline.generate_chapter_audio_viterbox import (
     setup_cuda,
     synthesize_chapter,
 )
+from scripts.story_pipeline.audio_quality import check_wav, regen_issues as filter_regen
 
 
 def cuda_free_gb() -> float:
@@ -111,6 +112,7 @@ def resolve_input_text(job: dict) -> tuple[Path, bool]:
 
 def process_job(job: dict, model: Viterbox, args: argparse.Namespace) -> None:
     output_path = Path(job["output_path"])
+    max_quality_retries = getattr(args, "max_quality_retries", 3)
 
     if output_path.exists() and not args.overwrite:
         repo.update_chapter_audio_output(job["chapter_id"], audio_path=output_path.as_posix())
@@ -120,8 +122,31 @@ def process_job(job: dict, model: Viterbox, args: argparse.Namespace) -> None:
 
     input_path, is_temp = resolve_input_text(job)
     try:
-        wait_for_gpu(args)
-        synthesize_chapter(model, input_path, output_path, build_tts_args(args))
+        text_content = input_path.read_text(encoding="utf-8")
+
+        for q_attempt in range(max_quality_retries + 1):
+            if q_attempt > 0:
+                output_path.unlink(missing_ok=True)
+                print(f"[QUALITY] retry {q_attempt}/{max_quality_retries}: re-synthesizing {output_path.name}")
+
+            wait_for_gpu(args)
+            synthesize_chapter(model, input_path, output_path, build_tts_args(args))
+
+            try:
+                all_issues, bad = check_wav(output_path, text_content)
+            except Exception as exc:
+                print(f"[QUALITY] check error (ignoring): {exc}")
+                break
+
+            if not bad:
+                if all_issues:
+                    print(f"[QUALITY] OK (review flags: {', '.join(all_issues)})")
+                break
+
+            if q_attempt < max_quality_retries:
+                print(f"[QUALITY] attempt {q_attempt+1}/{max_quality_retries} failed — {', '.join(bad)}")
+            else:
+                print(f"[QUALITY] max retries reached, accepting: {', '.join(bad)}")
     finally:
         if is_temp:
             input_path.unlink(missing_ok=True)
@@ -141,7 +166,10 @@ def run_one(job: dict, model: Viterbox, args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Worker tạo audio chapter từ story_jobs bằng Viterbox.")
-    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--once", action="store_true",
+                        help="Process one job then exit (alias for --max-jobs 1)")
+    parser.add_argument("--max-jobs", type=int, default=0,
+                        help="Exit after processing N jobs (0=run until no pending jobs)")
     parser.add_argument("--idle-sleep", type=float, default=5.0)
     parser.add_argument("--retry-delay", type=int, default=300)
     parser.add_argument("--worker-id", default=f"audio-{socket.gethostname()}")
@@ -150,6 +178,8 @@ def main() -> None:
     parser.add_argument("--gpu-wait-seconds", type=float, default=30.0)
     parser.add_argument("--gpu-lock-path", default="/tmp/betterbox_tts_gpu.lock")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--max-quality-retries", type=int, default=3,
+                        help="Max re-synthesis attempts per chapter if quality check fails (default 3)")
 
     parser.add_argument("--reference-audio", default="wavs/vieneu_alloy1512_1005.wav")
     parser.add_argument("--language", default="vi")
@@ -189,16 +219,19 @@ def main() -> None:
     try:
         print(f"Loading Viterbox on {args.device}")
         model = Viterbox.from_pretrained(args.device)
+        max_jobs = 1 if args.once else args.max_jobs
+        jobs_done = 0
         while True:
             jobs = repo.claim_story_jobs("audio_chapter", args.worker_id, limit=1)
             if not jobs:
-                if args.once:
+                if max_jobs > 0:
                     print("No pending audio jobs.")
                     return
                 time.sleep(args.idle_sleep)
                 continue
             run_one(jobs[0], model, args)
-            if args.once:
+            jobs_done += 1
+            if max_jobs > 0 and jobs_done >= max_jobs:
                 return
     finally:
         if lock_handle is not None:

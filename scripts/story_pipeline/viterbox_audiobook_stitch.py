@@ -9,8 +9,8 @@ import torch
 from viterbox.tts_helper.tts_precision import config_token_for_precision
 
 
-AUTO_MAX_CHARS_PER_UNIT = 220
-AUTO_MIN_CHARS_PER_UNIT = 45
+AUTO_MAX_CHARS_PER_UNIT = 300
+AUTO_MIN_CHARS_PER_UNIT = 70
 
 _SENTENCE_RE = re.compile(r'.+?(?:[.!?。！？…]+["\'”’)]*|$)(?=\s+|$)', re.DOTALL)
 _HARD_END_RE = re.compile(r'[.!?。！？…]+["\'”’)]*$')
@@ -104,7 +104,7 @@ def _semantic_pack_sentences(sentences: list[str], max_chars: int, min_chars: in
 
         can_soft_merge = (
             min_chars > 0
-            and len(sentence) < min_chars
+            and 15 < len(sentence) < min_chars   # ≤15 chars = sound-word / onomatopoeia → keep isolated
             and idx + 1 < len(sentences)
             and not _is_dialogue_or_exclamation(sentence)
         )
@@ -152,7 +152,12 @@ def sanitize_unit_for_tts(text: str) -> str:
     text = re.sub(r"\s+([.,])", r"\1", text)
     text = re.sub(r"([.,]){2,}", r"\1", text)
     text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    text = text.strip()
+    # Strip leading sentence-end punctuation — Viterbox vocalises a leading "."
+    # as "ờ" (audible artifact). This can appear when a dialogue line originally
+    # started with "..." and clean_for_audiobook_tts converted it to ". text".
+    text = re.sub(r"^[.,;:\s]+", "", text)
+    return text
 
 
 def normalize_unit_for_viterbox(text: str, word_count: int | None = None) -> str:
@@ -243,6 +248,7 @@ def trim_trailing_artifact(
 
 
 def trim_trailing_artifact_for_unit(audio: np.ndarray, sr: int, word_count: int) -> tuple[np.ndarray, float]:
+    # Short/medium units: tighter threshold to catch buzz after !-sentences
     if word_count <= 17:
         return trim_trailing_artifact(
             audio,
@@ -250,28 +256,40 @@ def trim_trailing_artifact_for_unit(audio: np.ndarray, sr: int, word_count: int)
             absolute_threshold=0.006,
             relative_threshold=0.08,
             frame_ms=30,
-            margin_ms=170,
+            margin_ms=100,
             min_trim_ms=120,
         )
-    return trim_trailing_artifact(audio, sr)
+    # Long units (>17 words): same aggressive params — they are even more likely to
+    # accumulate trailing noise since T3 must sustain attention over more tokens.
+    # Lower absolute_threshold (0.0045 vs 0.006) because long-sentence artifacts are
+    # typically quieter residual noise rather than full-amplitude buzz.
+    return trim_trailing_artifact(
+        audio,
+        sr,
+        absolute_threshold=0.0045,
+        relative_threshold=0.035,
+        frame_ms=30,
+        margin_ms=100,
+        min_trim_ms=120,
+    )
 
 
-def trim_excess_duration_for_unit(audio: np.ndarray, sr: int, word_count: int) -> tuple[np.ndarray, float]:
+def trim_excess_duration_for_unit(audio: np.ndarray, sr: int, word_count: int, n_commas: int = 0) -> tuple[np.ndarray, float]:
     """Cap suspiciously long short-unit audio.
 
     When T3 misses EOS, the generated audio may continue as a rasp or repeat a
     trailing phrase. RMS-based endpoint detection can treat that artifact as
     voiced. For short and medium units, a conservative duration cap catches the
     obvious overflow while leaving long narrative units untouched.
+
+    Cap is set at 2.0× expected to allow slow emotional/narrative delivery
+    (which can run 30-60% over the baseline estimate) without hard-cutting real speech.
+    Genuine EOS overflow generates 3-10× expected and is still caught well within this cap.
     """
     if audio is None or len(audio) == 0 or word_count <= 0 or word_count > 17:
         return audio, 0.0
 
-    # Vietnamese audiobook cadence usually fits under this cap for short units.
-    # The margin is intentionally generous so natural slow delivery is preserved.
-    max_seconds = max(0.85, word_count * 0.27 + 0.45)
-    if word_count <= 4:
-        max_seconds = max(0.70, word_count * 0.25 + 0.40)
+    max_seconds = expected_unit_duration_seconds(word_count, n_commas) * 2.0
 
     max_samples = int(sr * max_seconds)
     min_trim_samples = int(sr * 0.08)
@@ -282,22 +300,31 @@ def trim_excess_duration_for_unit(audio: np.ndarray, sr: int, word_count: int) -
     return audio[:max_samples], trimmed_ms
 
 
-def expected_unit_duration_seconds(word_count: int) -> float:
+def expected_unit_duration_seconds(word_count: int, n_commas: int = 0) -> float:
+    """Expected maximum duration for a unit. n_commas accounts for TTS pause at each comma."""
     if word_count <= 0:
         return 0.0
+    comma_bonus = n_commas * 0.45  # each comma adds ~0.45s pause in Viterbox output
     if word_count <= 4:
-        return max(0.70, word_count * 0.25 + 0.40)
+        return max(0.70, word_count * 0.25 + 0.40) + comma_bonus
     if word_count <= 17:
-        return max(0.85, word_count * 0.27 + 0.45)
-    return word_count * 0.34 + 0.70
+        return max(0.85, word_count * 0.27 + 0.45) + comma_bonus
+    return word_count * 0.34 + 0.70 + comma_bonus
 
 
-def should_retry_short_unit(audio: np.ndarray, sr: int, word_count: int) -> bool:
+def should_retry_short_unit(audio: np.ndarray, sr: int, word_count: int, n_commas: int = 0) -> bool:
     if audio is None or len(audio) == 0 or word_count <= 0 or word_count > 17:
         return False
-    expected = expected_unit_duration_seconds(word_count)
+    expected = expected_unit_duration_seconds(word_count, n_commas)
     duration = len(audio) / sr
-    return duration > expected + 0.28
+    # Only retry when audio is clearly anomalous — genuine EOS miss produces audio
+    # 2-3× the expected length.  The old +0.55s margin was far too tight: emotional
+    # dialogue or slow narration can easily run 30-60% over the "expected" duration
+    # without any overflow, and the retry (scale=0.82) then *truncates* real words.
+    # Use max(2× expected, expected+2.0) so both short units (absolute margin matters)
+    # and long units (percentage margin matters) are handled correctly.
+    threshold = max(expected * 2.0, expected + 2.0)
+    return duration > threshold
 
 
 def generate_unit_audio_with_retry(
@@ -314,6 +341,7 @@ def generate_unit_audio_with_retry(
     speed: float,
     pitch_shift: float,
 ) -> tuple[np.ndarray, float, int]:
+    n_commas = unit.count(",")
     scales = (1.0, 0.82, 0.68) if word_count <= 17 else (1.0,)
     best_audio: np.ndarray | None = None
     best_scale = scales[0]
@@ -335,7 +363,7 @@ def generate_unit_audio_with_retry(
         if best_audio is None or len(audio_np) < len(best_audio):
             best_audio = audio_np
             best_scale = scale
-        if not should_retry_short_unit(audio_np, model.sr, word_count):
+        if not should_retry_short_unit(audio_np, model.sr, word_count, n_commas):
             return audio_np, scale, attempts
         print(
             f"[retry] short unit overflow words={word_count} "
@@ -449,12 +477,13 @@ def synthesize_viterbox_audiobook(
         normalize_start = time.perf_counter()
         hard_boundaries = count_hard_boundaries(unit)
         word_count = count_words(unit)
+        n_commas = unit.count(",")
         spoken = normalize_unit_for_viterbox(unit, word_count=word_count)
         token_count = model.tokenizer.text_to_tokens(spoken, language_id=language).shape[-1]
         normalize_elapsed = time.perf_counter() - normalize_start
         print(
             f"\n[{idx}/{len(units)}] unit chars={len(unit)} words={word_count} tokens={token_count} "
-            f"hard_boundaries={hard_boundaries}: {unit[:140]}"
+            f"hard_boundaries={hard_boundaries} commas={n_commas}: {unit[:140]}"
         )
         infer_start = time.perf_counter()
         audio_np, token_scale, attempts = generate_unit_audio_with_retry(
@@ -476,8 +505,17 @@ def synthesize_viterbox_audiobook(
         audio_np = trim_edges(audio_np, threshold=trim_threshold, margin_ms=trim_margin_ms, sr=model.sr)
         edge_trim_ms = (raw_samples - len(audio_np)) / model.sr * 1000 if raw_samples > len(audio_np) else 0.0
         audio_np, tail_trim_ms = trim_trailing_artifact_for_unit(audio_np, sr=model.sr, word_count=word_count)
-        audio_np, duration_trim_ms = trim_excess_duration_for_unit(audio_np, sr=model.sr, word_count=word_count)
-        effective_fade_out_ms = max(edge_fade_out_ms, 45) if 2 <= word_count <= 4 else edge_fade_out_ms
+        audio_np, duration_trim_ms = trim_excess_duration_for_unit(audio_np, sr=model.sr, word_count=word_count, n_commas=n_commas)
+        # Trailing buzz ("rè") at sentence ends:
+        #   - Viterbox TTS generates a tonal artifact after sentence-ending "."
+        #   - This artifact is loud enough (~0.03-0.05 RMS) to be counted as "voiced"
+        #     by RMS-based trim → trim_trailing_artifact reports tail_trim=0ms always
+        #   - A 100ms fade reliably masks buzzes up to ~100ms without cutting real speech
+        #   - Short units (2-4 words) use 120ms: buzz is more prominent relative to clip length
+        if 2 <= word_count <= 4:
+            effective_fade_out_ms = max(edge_fade_out_ms, 120)
+        else:
+            effective_fade_out_ms = max(edge_fade_out_ms, 100)
         audio_np = edge_fade(audio_np, model.sr, fade_in_ms=edge_fade_in_ms, fade_out_ms=effective_fade_out_ms)
         post_elapsed = time.perf_counter() - post_start
         if len(audio_np) > 0:

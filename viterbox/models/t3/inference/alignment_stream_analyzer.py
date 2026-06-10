@@ -56,9 +56,16 @@ class AlignmentStreamAnalyzer:
         self.last_aligned_attn = None
         self._add_attention_spy(tfmr, alignment_layer_idx)
 
-    # Thêm method mới vào class AlignmentStreamAnalyzer:
-    def reset(self):
-        """Reset state for a new inference pass."""
+    def reset(self, text_tokens_slice: tuple[int, int] | None = None):
+        """Reset state for a new inference pass.
+
+        Call before each sentence with the updated ``text_tokens_slice`` so the
+        analyzer tracks the right column range in the attention matrix.
+        If ``text_tokens_slice`` is None the previous slice is reused (e.g. when
+        calling from tests that fix a single slice).
+        """
+        if text_tokens_slice is not None:
+            self.text_tokens_slice = text_tokens_slice
         i, j = self.text_tokens_slice
         self.alignment = torch.zeros(0, j - i)
         self.curr_frame_pos = 0
@@ -158,7 +165,9 @@ class AlignmentStreamAnalyzer:
         last_text_token_duration = A[15:, -3:].sum()
 
         # Activations for the final token that last too long are likely hallucinations.
-        long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 10) # 400ms
+        # Threshold lowered from 10 (400ms) → 5 (200ms): Vietnamese trailing buzz is
+        # typically 0.2-0.5s — detecting faster prevents audible rè artifact.
+        long_tail = self.complete and (A[self.completed_at:, -3:].sum(dim=0).max() >= 5) # 200ms
 
         # If there are activations in previous tokens after generation has completed, assume this is a repetition error.
         repetition = self.complete and (A[self.completed_at:, :-5].max(dim=1).values.sum() > 5)

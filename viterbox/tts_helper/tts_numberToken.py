@@ -46,12 +46,23 @@ def _reading_profile(word_count: int) -> tuple[float, float, float]:
 
 
 def _budget_guard(word_count: int) -> tuple[float, int]:
+    # The guard band lets T3 finish naturally and emit EOS without being cut short.
+    # Previously 1.05x + 10 tokens gave ~15 token slack for short/medium units —
+    # too much room for garbage tokens → buzz.  With AlignmentStreamAnalyzer active
+    # as the primary EOS enforcer, a tighter guard is now safe:
+    #   - 1.03x + 5 for ≤17 words → ~9 token slack (was ~15)
+    #   - 1.08x + 12 for longer  → ~18 slack (was ~24)
     if word_count <= 17:
-        return 1.05, 10
-    return 1.12, 20
+        return 1.03, 5
+    return 1.08, 12
 
 
 def getNumberTokenText(content: str, input_token_count: int) -> int:
+    # Count sentence boundaries BEFORE clearText strips them.
+    # clearText converts '.' → ', ' so _pause_seconds_from_punctuation(clearText(content))
+    # always returns sentence_like=0 — causing the budget to miss the 0.30s sentence pause.
+    pause_seconds_raw = _pause_seconds_from_punctuation(content)
+
     # Xử lý text - BUỘC PHẢI CÓ ĐỂ CHUẨN HÓA
     getContent = clearText(content)
     getContent = normalize_text(getContent)
@@ -61,13 +72,13 @@ def getNumberTokenText(content: str, input_token_count: int) -> int:
 
     if n == 1:
         # sẽ sử dụng cái này nhiều nhất cho advance mode TTS
-        # vì cách hoạt động của hàm inference là tách từng chữ ra inference rồi ráp kết quả TTS lại 
+        # vì cách hoạt động của hàm inference là tách từng chữ ra inference rồi ráp kết quả TTS lại
         getNumber = number_token_for_single_word(n, getContent, input_token_count)
         print(f"\n💎 input_tokens={input_token_count}, words={n}, max_speech_tokens={getNumber}, text={bunchOfText}")
         return getNumber
 
     spoken_chars = _count_spoken_chars(getContent)
-    pause_seconds = _pause_seconds_from_punctuation(getContent)
+    pause_seconds = pause_seconds_raw  # use pre-clearText value to include sentence pauses
     token_ratio, seconds_per_word, chars_per_second = _reading_profile(n)
 
     token_based = input_token_count * token_ratio

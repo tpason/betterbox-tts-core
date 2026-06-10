@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 from story_db.story_pipeline_db import repository as repo
 from viterbox import Viterbox
 from scripts.story_pipeline.generate_chapter_audio_viterbox import detect_device, setup_cuda
+from scripts.story_pipeline.story_text_markup import prepare_text_for_tts
 from scripts.story_pipeline.viterbox_audiobook_stitch import (
     count_words,
     edge_fade,
@@ -132,6 +133,7 @@ def acquire_gpu_lock(lock_path: Path) -> IO[str]:
 
 
 def synthesize_segment(model: Viterbox, text: str, args: argparse.Namespace) -> tuple[object, float]:
+    text = prepare_text_for_tts(text)
     word_count = count_words(text)
     spoken = normalize_unit_for_viterbox(text, word_count=word_count)
     audio_np, _token_scale, _attempts = generate_unit_audio_with_retry(

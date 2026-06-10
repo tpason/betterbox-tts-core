@@ -110,8 +110,11 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         logits = self.speech_head(hidden_states)
         # assert inputs_embeds.size(0) == 1 # (disabled for CFG)
 
-        # NOTE: hallucination handler may modify logits to force emit an EOS token
-        # logits = self.alignment_stream_analyzer.step(logits)
+        # NOTE: hallucination handler may modify logits to force emit an EOS token.
+        # Uses attention-alignment analysis to detect "long_tail" (model stuck on final
+        # text tokens) or "repetition" and forces EOS, eliminating trailing buzz (rè).
+        if self.alignment_stream_analyzer is not None:
+            logits = self.alignment_stream_analyzer.step(logits)
 
         return CausalLMOutputWithCrossAttentions(
             logits=logits,

@@ -27,7 +27,7 @@ Path(os.environ["GRADIO_TEMP_DIR"]).mkdir(parents=True, exist_ok=True)
 from viterbox import Viterbox  # noqa: E402
 from viterbox.tts_helper.tts_extension import punc_norm  # noqa: E402
 from viterbox.tts_helper.tts_precision import config_token_for_precision  # noqa: E402
-from scripts.story_pipeline.story_text_markup import pack_for_viterbox_tts  # noqa: E402
+from scripts.story_pipeline.story_text_markup import pack_for_viterbox_tts, prepare_text_for_tts  # noqa: E402
 from scripts.story_pipeline.viterbox_audiobook_stitch import synthesize_viterbox_audiobook  # noqa: E402
 
 
@@ -275,6 +275,12 @@ def synthesize_chapter(
     if not text:
         print(f"[SKIP] File rỗng: {chapter_path}")
         return
+    original_len = len(text)
+    text = prepare_text_for_tts(text)
+    if not text:
+        print(f"[SKIP] Text rỗng sau prepare_text_for_tts: {chapter_path}")
+        return
+    print(f"[PREP] {chapter_path.name}: {original_len} → {len(text)} chars after TTS prep")
     if not args.no_tts_markup:
         text = pack_for_viterbox_tts(
             text,

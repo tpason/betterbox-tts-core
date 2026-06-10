@@ -276,7 +276,12 @@ class T3(nn.Module):
         
         # Luôn reset state trước mỗi lần inference để tránh "lỗi tích lũy"
         # giữa các câu (đặc biệt _added_cond và alignment stream state).
-        self.patched_model.alignment_stream_analyzer.reset()
+        # QUAN TRỌNG: truyền text_tokens_slice mới vào reset() để analyzer biết
+        # vị trí text tokens trong attention matrix của câu hiện tại.
+        # Không cập nhật slice → analyzer dùng slice cũ → phân tích alignment sai!
+        self.patched_model.alignment_stream_analyzer.reset(
+            text_tokens_slice=(len_cond, len_cond + text_tokens.size(-1))
+        )
         self.patched_model.reset()
 
         # # Run normal generate method, which calls our custom extended methods
