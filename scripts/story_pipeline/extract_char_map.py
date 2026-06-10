@@ -630,6 +630,171 @@ def _extract_char_notes(content: str, char_name: str) -> str:
     return ""
 
 
+# ── Incremental (per-chapter) update ──────────────────────────────────────────
+
+def _default_char_map_path(story_id: str, slug: str) -> Path:
+    return ROOT / "story_data" / "char_maps" / f"{story_id}-{slug}.txt"
+
+
+# Lightweight prompt dùng cho incremental extraction (1 chapter).
+# Ngắn hơn EXTRACT_USER để giảm latency, không cần /no_think vì qwen3 đã đủ nhanh.
+_INC_EXTRACT_USER = """Đọc đoạn truyện sau (chapter {chapter_num}) và liệt kê nhân vật CÓ TÊN RIÊNG xuất hiện.
+
+Char-map hiện tại (nhân vật ĐÃ BIẾT — KHÔNG lặp lại):
+---
+{known_names}
+---
+
+Chỉ liệt kê nhân vật CHƯA CÓ trong danh sách trên.
+Nếu không có nhân vật mới: trả về [].
+
+Với mỗi nhân vật mới, trả về JSON object:
+{{
+  "name": "tên",
+  "aliases": [],
+  "gender": "nam" | "nữ" | "không rõ",
+  "pronoun_3rd": "anh ta / cô ta / hắn / nàng / ...",
+  "self_address": "tôi / ta / ...",
+  "addressing_others": "gọi đồng đội/cấp trên/kẻ thù thế nào",
+  "relative_status": "tuổi/vị thế nếu suy được",
+  "personality": "2-4 từ",
+  "speech_style": "câu ngắn/dài, kiệm lời/nhiều lời, v.v.",
+  "role": "nhân vật chính / đồng đội / phản diện / phụ"
+}}
+
+Trả về JSON array. Ví dụ: [{{"name": "Enkrid", ...}}]
+Chỉ JSON, không giải thích.
+
+Văn bản:
+{text}
+"""
+
+
+def update_char_map_incremental(
+    chapter_text: str,
+    chapter_num: int,
+    char_map_path: str,
+    story_id: str,
+    story_title: str,
+    slug: str,
+    genre: str = "",
+    ollama_url: str = "http://127.0.0.1:11434",
+    model: str = "qwen3:14b",
+    timeout: int = 90,
+    session: requests.Session | None = None,
+) -> bool:
+    """
+    Incremental char-map update: trích xuất nhân vật MỚI từ 1 chapter vừa polished,
+    append vào char-map. Không bao giờ overwrite entries đã có.
+
+    Gọi sau mỗi chapter thành công trong polish_worker.
+    Returns True nếu có nhân vật mới được thêm hoặc char-map được tạo mới.
+    """
+    if not chapter_text or len(chapter_text.strip()) < 200:
+        return False
+
+    out_path = Path(char_map_path) if char_map_path else _default_char_map_path(story_id, slug)
+
+    existing_content = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+    existing_chars = parse_existing_char_map(existing_content) if existing_content else {}
+
+    # Liệt kê tên đã biết để model không extract lại
+    known_names_str = ", ".join(
+        c.get("name") or k for k, c in existing_chars.items()
+    ) if existing_chars else "(chưa có)"
+
+    url = ollama_url.rstrip("/") + "/api/chat"
+    payload = {
+        "model": model,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": EXTRACT_SYSTEM},
+            {"role": "user", "content": _INC_EXTRACT_USER.format(
+                chapter_num=chapter_num,
+                known_names=known_names_str[:1500],
+                text=chapter_text[:4000],
+            )},
+        ],
+        "options": {"temperature": 0.1, "num_ctx": 6144},
+        "keep_alive": "5m",
+    }
+    try:
+        client = session or requests
+        resp = client.post(url, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        content = resp.json().get("message", {}).get("content", "")
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.IGNORECASE)
+        content = re.sub(r"\s*```$", "", content)
+        try:
+            new_chars = json.loads(content)
+            if not isinstance(new_chars, list):
+                new_chars = []
+        except json.JSONDecodeError:
+            m = re.search(r"\[[\s\S]*\]", content)
+            new_chars = json.loads(m.group()) if m else []
+    except Exception as exc:
+        print(f"[CHAR_MAP_INC] ch{chapter_num:04d}: extract failed: {exc}")
+        return False
+
+    if not new_chars:
+        # Không có nhân vật mới — chỉ cập nhật metadata updated_to_chapter
+        _bump_char_map_coverage(story_id, chapter_num)
+        return False
+
+    all_chars = merge_characters(dict(existing_chars), new_chars, chapter_num=chapter_num)
+    new_keys = set(all_chars.keys()) - set(existing_chars.keys())
+
+    if not new_keys:
+        _bump_char_map_coverage(story_id, chapter_num)
+        return False
+
+    # Build updated content
+    if existing_content:
+        updated_content = append_new_char_sections(
+            existing_content, all_chars, existing_chars, f"{chapter_num:04d}"
+        )
+    else:
+        # Chapter đầu tiên — tạo char-map mới
+        updated_content = format_char_map(
+            chars=all_chars,
+            story_title=story_title,
+            story_id=story_id,
+            chapter_range=f"0001-{chapter_num:04d}",
+            genre=genre,
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(updated_content, encoding="utf-8")
+
+    try:
+        metadata_update: dict[str, Any] = {
+            "char_map_updated_to_chapter": chapter_num,
+            "char_map_content": updated_content,
+        }
+        if not existing_content:
+            metadata_update["char_map_path"] = out_path.relative_to(ROOT).as_posix()
+        repo.update_story_metadata(story_id, metadata_update)
+    except Exception as exc:
+        print(f"[CHAR_MAP_INC] DB metadata failed: {exc}")
+
+    new_names = [all_chars[k].get("name") or k for k in new_keys]
+    print(f"[CHAR_MAP_INC] ch{chapter_num:04d}: +{len(new_keys)} nhân vật mới: {new_names}")
+    return True
+
+
+def _bump_char_map_coverage(story_id: str, chapter_num: int) -> None:
+    """Cập nhật char_map_updated_to_chapter mà không thay đổi file."""
+    try:
+        story = repo.get_story_by_id(story_id)
+        meta = story.get("metadata") or {}
+        current = int(meta.get("char_map_updated_to_chapter") or 0)
+        if chapter_num > current:
+            repo.update_story_metadata(story_id, {"char_map_updated_to_chapter": chapter_num})
+    except Exception:
+        pass
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -830,6 +995,7 @@ def main() -> None:
             story_id,
             {
                 "char_map_path": out_path.relative_to(ROOT).as_posix(),
+                "char_map_content": output_content,
                 "char_map_updated_to_chapter": max(coverage_nums),
                 "char_map_query_from_chapter": chapter_nums[0],
                 "char_map_query_to_chapter": chapter_nums[-1],

@@ -22,10 +22,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 from story_db.story_pipeline_db import repository as repo
 from genre_prompts import detect_genre, find_char_map_file, resolve_genre_from_context
+from extract_char_map import update_char_map_incremental
 from polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from reader_content_format import format_polished_content as format_reader_polished_content
 from translate_chapter_texts_ollama import single_pass_translate_polish_file, translate_file
-from check_translation_quality import check_polished_quality
+from check_translation_quality import BLOCKING_QUALITY_ISSUES, check_polished_quality
 
 
 def story_slug_for_job(job: dict, input_path: Path) -> str:
@@ -115,7 +116,15 @@ def maybe_auto_update_char_map(
     text_source: str,
     genre: str = "",
 ) -> str:
-    """Create/update char map opportunistically. Never fail the story job."""
+    """Create/update char map opportunistically. Never fail the story job.
+
+    Hai mode tạo char-map:
+    - Batch (build_char_map_from_story.py): scan toàn bộ story, nặng, dùng khi cần rebuild.
+      Bị tắt bởi --no-batch-char-map (default ON).
+    - Seed (extract_char_map.py --to-chapter 10): scan 10 chapter đầu, nhẹ, dùng khi chưa có map.
+      Chạy tự động khi chưa có char-map, ngay cả khi --no-batch-char-map bật.
+    - Incremental (_run_incremental_char_map): cập nhật sau mỗi chapter polish xong.
+    """
     if getattr(args, "no_auto_char_map", False):
         return existing_char_map
     story_id = str(job.get("story_id") or "")
@@ -136,13 +145,18 @@ def maybe_auto_update_char_map(
         updated_to = 0
 
     should_create = not existing_char_map
-    interval = int(getattr(args, "char_map_update_interval", 150) or 0)
+    interval = int(getattr(args, "char_map_update_interval", 0) or 0)
     should_update = bool(existing_char_map and interval > 0 and current_chapter >= updated_to + interval)
+
+    no_batch = getattr(args, "no_batch_char_map", False)
+
+    # Nếu --no-batch-char-map: skip batch update, nhưng vẫn tạo seed nếu chưa có map.
+    if no_batch and not should_create:
+        return existing_char_map
     if not should_create and not should_update:
         return existing_char_map
 
-    # Cooldown after a failed create attempt: skip retry until enough chapters later.
-    # Prevents hammering Ollama every chapter when the model is busy with other workers.
+    # Cooldown sau failed create: tránh hammering Ollama mỗi chapter.
     if should_create:
         failed_at = int(metadata.get("char_map_create_failed_at_chapter") or 0)
         cooldown = int(getattr(args, "char_map_create_cooldown", 30) or 30)
@@ -153,42 +167,79 @@ def maybe_auto_update_char_map(
             )
             return existing_char_map
 
+    model = str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b"))
+    char_map_timeout = max(30, int(getattr(args, "char_map_timeout", 180) or 180))
+
+    # Seed mode: tạo char-map từ 10 chapter đầu khi --no-batch-char-map bật (hoặc khi tạo lần đầu nhẹ hơn).
+    if should_create and no_batch:
+        seed_end = min(10, current_chapter)
+        log(f"[CHAR_MAP] seed create ch1-{seed_end:04d} story_id={story_id} slug={slug} text_source={text_source}")
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "extract_char_map.py"),
+            "--story-id", story_id,
+            "--text-source", text_source,
+            "--from-chapter", "1",
+            "--to-chapter", str(seed_end),
+            "--sample-chapters", str(seed_end),
+            "--model", model,
+            "--ollama-url", args.ollama_url,
+            "--timeout", str(char_map_timeout),
+        ]
+        if genre:
+            cmd.extend(["--genre", genre])
+        try:
+            result = subprocess.run(
+                cmd, cwd=ROOT, text=True, capture_output=True,
+                timeout=char_map_timeout * 3,
+            )
+            if result.returncode != 0:
+                tail = (result.stderr or result.stdout or "").strip()[-800:]
+                log(f"[CHAR_MAP WARN] seed extract failed rc={result.returncode}: {tail}")
+                _record_char_map_create_failure(story_id, current_chapter)
+            else:
+                # Mark raw coverage so lookahead knows seed already scanned ch1-seed_end
+                try:
+                    repo.update_story_metadata(story_id, {"char_map_raw_covered_to": seed_end})
+                except Exception:
+                    pass
+                return existing_char_map
+            refreshed = find_char_map_file(story_id=story_id, slug=slug)
+            if refreshed:
+                log(f"[CHAR_MAP] seed ready {refreshed}")
+                return refreshed
+        except Exception as exc:
+            log(f"[CHAR_MAP WARN] seed extract failed: {type(exc).__name__}: {exc}")
+            _record_char_map_create_failure(story_id, current_chapter)
+        return existing_char_map
+
+    # Batch mode: build_char_map_from_story.py (full scan hoặc append update).
     cmd = [
         sys.executable,
         str(SCRIPT_DIR / "build_char_map_from_story.py"),
-        "--story-id",
-        story_id,
-        "--text-source",
-        text_source,
-        "--model",
-        str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b")),
-        "--ollama-url",
-        args.ollama_url,
-        "--timeout",
-        str(max(30, int(getattr(args, "char_map_timeout", 180) or 180))),
-        "--min-frequency",
-        str(max(1, int(getattr(args, "char_map_min_frequency", 1) or 1))),
+        "--story-id", story_id,
+        "--text-source", text_source,
+        "--model", model,
+        "--ollama-url", args.ollama_url,
+        "--timeout", str(char_map_timeout),
+        "--min-frequency", str(max(1, int(getattr(args, "char_map_min_frequency", 1) or 1))),
     ]
-    # Inject genre header khi auto-create map mới cho truyện chưa có map
     if should_create and genre:
         cmd.extend(["--genre", genre])
     if should_update:
         from_chapter = max(1, updated_to + 1)
         cmd.extend(["--from-chapter", str(from_chapter), "--to-chapter", str(current_chapter), "--append-only"])
 
-    reason = "create" if should_create else f"update from ch{updated_to + 1:04d} to ch{current_chapter:04d}"
-    log(f"[CHAR_MAP] auto {reason} story_id={story_id} slug={slug} text_source={text_source}")
+    reason = "create" if should_create else f"update ch{updated_to + 1:04d}→ch{current_chapter:04d}"
+    log(f"[CHAR_MAP] batch {reason} story_id={story_id} slug={slug} text_source={text_source}")
     try:
         result = subprocess.run(
-            cmd,
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=max(180, int(getattr(args, "char_map_timeout", 180) or 180) * 4),
+            cmd, cwd=ROOT, text=True, capture_output=True,
+            timeout=max(180, char_map_timeout * 4),
         )
         if result.returncode != 0:
             tail = (result.stderr or result.stdout or "").strip()[-1000:]
-            log(f"[CHAR_MAP WARN] auto extract failed rc={result.returncode}: {tail}")
+            log(f"[CHAR_MAP WARN] batch extract failed rc={result.returncode}: {tail}")
             if should_create:
                 _record_char_map_create_failure(story_id, current_chapter)
             return existing_char_map
@@ -197,7 +248,7 @@ def maybe_auto_update_char_map(
             log(f"[CHAR_MAP] ready {refreshed}")
             return refreshed
     except Exception as exc:
-        log(f"[CHAR_MAP WARN] auto extract failed: {type(exc).__name__}: {exc}")
+        log(f"[CHAR_MAP WARN] batch extract failed: {type(exc).__name__}: {exc}")
         if should_create:
             _record_char_map_create_failure(story_id, current_chapter)
     return existing_char_map
@@ -209,6 +260,127 @@ def _record_char_map_create_failure(story_id: str, chapter: int) -> None:
         log(f"[CHAR_MAP] recorded create failure at ch{chapter:04d} — cooldown active")
     except Exception as exc:
         log(f"[CHAR_MAP WARN] could not record failure: {exc}")
+
+
+def _run_incremental_char_map(
+    polished_text: str,
+    chapter_num: int,
+    char_map_path: str,
+    story_id: str,
+    slug: str,
+    genre: str,
+    args: argparse.Namespace,
+) -> None:
+    """
+    Gọi update_char_map_incremental sau khi chapter được polish xong.
+    Không bao giờ raise exception — lỗi chỉ được log.
+    """
+    if getattr(args, "no_auto_char_map", False):
+        return
+    if getattr(args, "no_incremental_char_map", False):
+        return
+    if not polished_text or not story_id:
+        return
+    try:
+        # story title chỉ cần cho lần đầu tạo file
+        story_title = ""
+        try:
+            story = repo.get_story_by_id(story_id)
+            story_title = str(story.get("display_title") or story.get("title") or "")
+        except Exception:
+            pass
+
+        model = str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b"))
+        update_char_map_incremental(
+            chapter_text=polished_text,
+            chapter_num=chapter_num,
+            char_map_path=char_map_path,
+            story_id=story_id,
+            story_title=story_title,
+            slug=slug,
+            genre=genre,
+            ollama_url=args.ollama_url,
+            model=model,
+            timeout=int(getattr(args, "char_map_timeout", 90) or 90),
+        )
+    except Exception as exc:
+        log(f"[CHAR_MAP_INC WARN] ch{chapter_num:04d}: {exc}")
+
+
+def _run_lookahead_char_map(
+    job: dict,
+    args: argparse.Namespace,
+    *,
+    current_chapter: int,
+    char_map_path: str,
+    slug: str,
+    genre: str,
+) -> None:
+    """Pre-extract characters from raw text N chapters ahead of current_chapter.
+
+    Keeps char_map_raw_covered_to = current_chapter + lookahead_window so that
+    when translating ch11, the char-map already has raw character data up to ch21.
+
+    Each call extends coverage by exactly 1 chapter (incremental sliding window),
+    so the overhead per chapter is a single LLM call (~30-60s). No block pipeline.
+    """
+    if getattr(args, "no_auto_char_map", False):
+        return
+    if getattr(args, "no_incremental_char_map", False):
+        return
+    lookahead = int(getattr(args, "char_map_lookahead", 10) or 10)
+    if lookahead <= 0 or not char_map_path or not current_chapter:
+        return
+    story_id = str(job.get("story_id") or "")
+    if not story_id:
+        return
+
+    target = current_chapter + lookahead
+
+    try:
+        story = repo.get_story_by_id(story_id)
+        metadata = story.get("metadata") or {}
+        raw_covered = int(metadata.get("char_map_raw_covered_to") or 0)
+    except Exception:
+        raw_covered = 0
+
+    if raw_covered >= target:
+        return  # already ahead enough
+
+    from_ch = raw_covered + 1
+    model = str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b"))
+    char_map_timeout = max(30, int(getattr(args, "char_map_timeout", 90) or 90))
+    n_new = target - from_ch + 1
+
+    log(f"[CHAR_MAP LOOKAHEAD] ch{from_ch:04d}→ch{target:04d} (raw, {n_new} chaps) story_id={story_id}")
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "extract_char_map.py"),
+        "--story-id", story_id,
+        "--text-source", "raw",
+        "--from-chapter", str(from_ch),
+        "--to-chapter", str(target),
+        "--sample-chapters", str(n_new),
+        "--append-only",
+        "--model", model,
+        "--ollama-url", args.ollama_url,
+        "--timeout", str(char_map_timeout),
+    ]
+    if genre:
+        cmd.extend(["--genre", genre])
+    try:
+        result = subprocess.run(
+            cmd, cwd=ROOT, text=True, capture_output=True,
+            timeout=char_map_timeout * (n_new + 2),
+        )
+        if result.returncode != 0:
+            tail = (result.stderr or result.stdout or "").strip()[-500:]
+            log(f"[CHAR_MAP LOOKAHEAD WARN] failed rc={result.returncode}: {tail}")
+            return
+        repo.update_story_metadata(story_id, {"char_map_raw_covered_to": target})
+        log(f"[CHAR_MAP LOOKAHEAD] done — raw coverage now ch{target:04d}")
+    except Exception as exc:
+        log(f"[CHAR_MAP LOOKAHEAD WARN] {type(exc).__name__}: {exc}")
 
 
 # ─── Resource guard ────────────────────────────────────────────────────────────
@@ -361,10 +533,20 @@ def read_formatted_polished_output(output_path: Path, job: dict, *, write_back: 
     return read_formatted_output(output_path, job, write_back=write_back, label="polished")
 
 
-def _quality_warn(text: str, genre: str, char_map: str, label: str) -> None:
+def _quality_warn(text: str, genre: str, char_map: str, label: str) -> list[str]:
+    """Check quality and log. Returns list of issues found (empty = OK).
+    Blocking issues are logged at [QUALITY_FAIL]; others at [QUALITY_WARN].
+    """
     issues = check_polished_quality(text, genre=genre, char_map_path=char_map)
-    if issues:
-        log(f"[QUALITY_WARN] {label}: {', '.join(issues)}")
+    if not issues:
+        return []
+    blocking = [i for i in issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
+    warnings = [i for i in issues if i not in blocking]
+    if blocking:
+        log(f"[QUALITY_FAIL] {label}: {', '.join(blocking)}")
+    if warnings:
+        log(f"[QUALITY_WARN] {label}: {', '.join(warnings)}")
+    return issues
 
 
 def story_metadata_args(args: argparse.Namespace) -> Namespace:
@@ -538,6 +720,19 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     if effective_char_map:
         log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
 
+    # Lookahead: pre-extract raw characters N chapters ahead so the char-map is
+    # already populated when those chapters are translated (sliding window, 1 new
+    # chapter per call → minimal overhead). Runs only if char_map already exists.
+    if effective_char_map and current_chapter > 0:
+        _run_lookahead_char_map(
+            job,
+            args,
+            current_chapter=current_chapter,
+            char_map_path=effective_char_map,
+            slug=job_slug,
+            genre=pre_genre,
+        )
+
     genre = resolve_genre(job, effective_char_map)
     if genre:
         log(f"[GENRE] {genre} (story_id={job.get('story_id')})")
@@ -641,8 +836,6 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             translated_text_path=None if no_save else translated_path.as_posix(),
             translated_text_content=translated_text_content,
         )
-        if no_save:
-            translated_path.unlink(missing_ok=True)
         effective_char_map = maybe_auto_update_char_map(
             job,
             args,
@@ -670,6 +863,9 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 output_path,
                 _build_args_with_char_map(args.vi_model, polish_max_chars, genre),
             )
+        # Discard temp translated file only after polish finishes reading it.
+        if no_save:
+            translated_path.unlink(missing_ok=True)
         polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
         _quality_warn(polished_text_content, genre, effective_char_map or "", f"two-pass ch{current_chapter}")
         repo.update_chapter_text_outputs(
@@ -678,6 +874,20 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
             translated_text_content=translated_text_content,
             polished_text_content=polished_text_content,
+        )
+
+    # Incremental char-map update: extract nhân vật mới từ chapter vừa polished.
+    # Chạy sau mỗi chapter để char-map dần dày context cho các chapter tiếp theo.
+    polished_text_content = locals().get("polished_text_content") or ""
+    if polished_text_content and current_chapter > 0:
+        _run_incremental_char_map(
+            polished_text=polished_text_content,
+            chapter_num=current_chapter,
+            char_map_path=effective_char_map or "",
+            story_id=story_id,
+            slug=job_slug,
+            genre=genre,
+            args=args,
         )
 
     repo.complete_story_job(
@@ -738,6 +948,8 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--keep-alive", default="30m")
+    parser.add_argument("--max-quality-retries", type=int, default=2,
+                        help="Số lần retry khi chunk polish fail quality check (CJK/EN còn sót, sai đại từ...). Default: 2.")
     parser.add_argument("--prompt-profile", choices=("fast", "full"), default="full")
     parser.add_argument("--polish-mode", choices=("llm", "clean"), default="llm")
     parser.add_argument(
@@ -803,13 +1015,36 @@ def main() -> None:
     parser.add_argument(
         "--no-auto-char-map",
         action="store_true",
-        help="Tắt tự động tạo/cập nhật character map trong worker.",
+        help="Tắt tất cả auto char-map (cả batch lẫn incremental).",
+    )
+    parser.add_argument(
+        "--no-batch-char-map",
+        action="store_true",
+        default=bool(int(os.environ.get("POLISH_NO_BATCH_CHAR_MAP", "1"))),
+        help=(
+            "Tắt batch char-map builder (build_char_map_from_story.py). "
+            "Incremental per-chapter vẫn chạy sau mỗi chapter polish xong. Default: ON. "
+            "Tắt bằng POLISH_NO_BATCH_CHAR_MAP=0 hoặc bỏ flag khi cần full rescan."
+        ),
     )
     parser.add_argument(
         "--char-map-update-interval",
         type=int,
-        default=150,
-        help="Tự cập nhật char map sau mỗi N chapter mới. 0 = chỉ auto-create khi thiếu map.",
+        default=0,
+        help=(
+            "Batch deep-scan char map sau mỗi N chapter (via build_char_map_from_story). "
+            "0 (default) = tắt batch — chỉ dùng incremental per-chapter update. "
+            "Dùng khi cần re-scan nhiều chapter cùng lúc."
+        ),
+    )
+    parser.add_argument(
+        "--no-incremental-char-map",
+        action="store_true",
+        help=(
+            "Tắt incremental char-map update per-chapter. "
+            "Char-map chỉ được tạo/cập nhật qua --char-map-update-interval (batch) "
+            "hoặc manual CLI extract_char_map.py."
+        ),
     )
     parser.add_argument(
         "--char-map-text-source",
@@ -825,7 +1060,22 @@ def main() -> None:
     )
     parser.add_argument("--char-map-sample-chapters", type=int, default=30, help="Legacy no-op: giữ để tương thích CLI cũ.")
     parser.add_argument("--char-map-model", default="", help="Model dùng riêng để build char map; mặc định dùng --vi-model.")
-    parser.add_argument("--char-map-timeout", type=int, default=180)
+    parser.add_argument(
+        "--char-map-lookahead",
+        type=int,
+        default=10,
+        help=(
+            "Số chapter raw pre-extract trước chapter hiện tại (sliding window). "
+            "VD: 10 → khi dịch ch11, char-map đã có raw data đến ch21. "
+            "0 = tắt lookahead. Default: 10."
+        ),
+    )
+    parser.add_argument(
+        "--char-map-timeout",
+        type=int,
+        default=90,
+        help="Timeout (giây) cho mỗi LLM call trong char-map update (incremental hoặc batch). Default: 90.",
+    )
     parser.add_argument(
         "--char-map-create-cooldown",
         type=int,
@@ -874,8 +1124,8 @@ def main() -> None:
     parser.add_argument(
         "--no-save-files",
         action="store_true",
-        default=bool(int(os.environ.get("POLISH_NO_SAVE_FILES", "0"))),
-        help="DB-only mode: write translated/polished output to temp, save content to DB, discard files.",
+        default=bool(int(os.environ.get("POLISH_NO_SAVE_FILES", "1"))),
+        help="DB-only mode: write translated/polished output to temp, save content to DB, discard files. Default: ON.",
     )
     args = parser.parse_args()
 

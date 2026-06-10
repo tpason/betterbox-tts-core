@@ -859,6 +859,7 @@ def update_char_map_metadata(
     if not chapter_nums:
         return
     try:
+        content = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
         metadata: dict[str, Any] = {
             "char_map_path": out_path.relative_to(ROOT).as_posix(),
             "char_map_updated_to_chapter": chapter_nums[-1],
@@ -868,6 +869,8 @@ def update_char_map_metadata(
             "char_map_text_source": text_source,
             "char_map_updated_at": datetime.now().isoformat(timespec="seconds"),
         }
+        if content:
+            metadata["char_map_content"] = content
         repo.update_story_metadata(story_id, metadata)
     except Exception as exc:
         print(f"[DB WARN] Không cập nhật metadata: {exc}")
