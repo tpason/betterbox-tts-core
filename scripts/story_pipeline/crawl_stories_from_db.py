@@ -450,7 +450,7 @@ def upsert_downloaded_chapter(
             "is_locked": is_locked,
             "lock_reason": lock_reason,
             "raw_language": raw_language,
-            "raw_text_path": raw_path.as_posix() if raw_path else None,
+            "raw_text_path": raw_path.as_posix() if raw_path and raw_path.exists() else None,
             "raw_text_content": raw_text_content,
             "is_downloaded": bool(raw_text_content) or (raw_path.exists() if raw_path else False),
         },
