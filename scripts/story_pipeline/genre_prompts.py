@@ -475,6 +475,7 @@ def find_char_map_file(story_id: str = "", slug: str = "") -> str:
       story_data/char_maps/{story_id}-{slug}.txt  (ưu tiên nhất)
       story_data/char_maps/{story_id}.txt
       story_data/char_maps/{slug}.txt
+    Nếu không tìm thấy file, thử lấy path từ DB metadata (char_map_path).
     Trả về path tuyệt đối nếu tìm thấy, chuỗi rỗng nếu không.
     """
     base = _ROOT / "story_data" / "char_maps"
@@ -488,17 +489,65 @@ def find_char_map_file(story_id: str = "", slug: str = "") -> str:
     for p in candidates:
         if p.exists():
             return str(p)
+
+    # DB fallback: check metadata.char_map_path
+    if story_id:
+        db_path = _char_map_path_from_db_metadata(story_id)
+        if db_path:
+            return db_path
+
     return ""
 
 
-def load_char_map(char_map_file: str | None) -> str:
-    """Load character map text from file. Returns empty string if not found."""
-    if not char_map_file:
+def _char_map_path_from_db_metadata(story_id: str) -> str:
+    """
+    Lấy char_map_content từ DB, ghi ra /tmp để dùng như file.
+    Trả về path nếu có content, chuỗi rỗng nếu không.
+    """
+    if not story_id:
         return ""
-    p = _resolve_path(Path(char_map_file))
-    if not p.exists():
+    try:
+        from story_db.story_pipeline_db import repository as repo
+        story = repo.get_story_by_id(story_id)
+        if not story:
+            return ""
+        meta = story.get("metadata") or {}
+        # Thử file path trong metadata trước
+        db_path_str = meta.get("char_map_path", "")
+        if db_path_str:
+            db_path = _resolve_path(Path(db_path_str))
+            if db_path.exists():
+                return str(db_path)
+        # Fallback: dùng content từ metadata
+        content = meta.get("char_map_content", "")
+        if not content:
+            return ""
+        tmp_path = Path(f"/tmp/betterbox_char_map_{story_id}.txt")
+        tmp_path.write_text(content, encoding="utf-8")
+        return str(tmp_path)
+    except Exception:
         return ""
-    return p.read_text(encoding="utf-8").strip()
+
+
+def load_char_map(char_map_file: str | None, story_id: str = "") -> str:
+    """Load character map text from file, with DB fallback when story_id provided."""
+    if char_map_file:
+        p = _resolve_path(Path(char_map_file))
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
+
+    # DB fallback
+    if story_id:
+        try:
+            from story_db.story_pipeline_db import repository as repo
+            story = repo.get_story_by_id(story_id)
+            content = (story.get("metadata") or {}).get("char_map_content", "") if story else ""
+            if content:
+                return content.strip()
+        except Exception:
+            pass
+
+    return ""
 
 
 def parse_aliases(char_map: str) -> dict[str, str]:

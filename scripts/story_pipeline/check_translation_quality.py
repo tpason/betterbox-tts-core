@@ -57,6 +57,38 @@ def is_probably_vietnamese(text: str) -> bool:
     return diacritics >= 12 or vi_hits >= 4
 
 
+# ── Issue constants ─────────────────────────────────────────────────────────
+
+# Issues in this set trigger automatic re-polish/re-translate retry.
+BLOCKING_QUALITY_ISSUES: frozenset[str] = frozenset({
+    "not_vietnamese",
+    "cjk_not_translated",
+    "repeated_content",
+    "large_en_block",
+    "wrong_pronoun",   # sai đại từ hắn/nàng trong western_fantasy/do_thi/lang_man
+    "forbidden_term",  # dùng từ bị cấm trong char map
+})
+
+
+def issue_to_repair_hint(issue: str) -> str:
+    """Convert a quality issue code to a Vietnamese repair instruction for the model."""
+    base = issue.split(":")[0]
+    if base == "not_vietnamese":
+        return "Toàn bộ output phải bằng tiếng Việt — không để lại nội dung bằng ngôn ngữ khác."
+    if base == "cjk_not_translated":
+        return "Còn ký tự tiếng Trung/Hàn chưa dịch — dịch toàn bộ sang tiếng Việt tự nhiên."
+    if base == "repeated_content":
+        return "Có đoạn văn bị lặp lại — xóa nội dung lặp, giữ mỗi đoạn xuất hiện một lần."
+    if base == "large_en_block":
+        return "Còn đoạn tiếng Anh chưa dịch — dịch toàn bộ sang tiếng Việt tự nhiên."
+    if base == "wrong_pronoun":
+        return "Dùng sai đại từ hắn/nàng/lão/y cho thể loại này — đổi thành anh ta/cô ấy theo char map."
+    if base == "forbidden_term":
+        term = issue[len("forbidden_term:"):].strip() if ":" in issue else ""
+        return f"Dùng từ bị cấm {term} — đổi theo char map." if term else "Còn từ bị cấm trong char map — kiểm tra và đổi."
+    return f"Lỗi chất lượng: {issue}"
+
+
 # ── Patterns ────────────────────────────────────────────────────────────────
 
 # Hán Việt pronouns that shouldn't appear in western_fantasy/do_thi narrative
@@ -74,6 +106,22 @@ _COMPOUND_NOUN_RE = re.compile(
 )
 # Detect large untranslated English blocks (80+ non-Vietnamese chars)
 _EN_BLOCK_RE = re.compile(r"[A-Za-z][A-Za-z ,\.'\-]{79,}")
+
+
+def _has_cjk_contamination(text: str, threshold: int = 5) -> bool:
+    """True if text has >= threshold CJK characters (untranslated source still present)."""
+    return len(_CJK_RE.findall(text)) >= threshold
+
+
+def _has_repeated_content(text: str, min_block: int = 120) -> bool:
+    """True if any paragraph of >= min_block chars appears more than once (model looping)."""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if len(p.strip()) >= min_block]
+    seen: set[str] = set()
+    for p in paragraphs:
+        if p in seen:
+            return True
+        seen.add(p)
+    return False
 
 
 def _extract_forbidden_terms(char_map_path: str) -> list[str]:
@@ -114,6 +162,7 @@ def check_polished_quality(
 ) -> list[str]:
     """
     Trả về list các quality issue (empty = OK).
+    Issues trong BLOCKING_QUALITY_ISSUES sẽ trigger retry; còn lại là warnings.
     Gọi sau khi polish xong, trước khi save vào DB.
     """
     issues: list[str] = []
@@ -125,20 +174,29 @@ def check_polished_quality(
     if not is_probably_vietnamese(text):
         issues.append("not_vietnamese")
 
-    # Check 2: forbidden terms from char map
+    # Check 2: CJK contamination (untranslated source still present)
+    cjk_count = len(_CJK_RE.findall(text))
+    if cjk_count >= 5:
+        issues.append(f"cjk_not_translated:{cjk_count}")
+
+    # Check 3: model looping (duplicate paragraphs)
+    if _has_repeated_content(text):
+        issues.append("repeated_content")
+
+    # Check 4: forbidden terms from char map
     if char_map_path:
         bad_terms = _extract_forbidden_terms(char_map_path)
         for term in bad_terms:
             if term in text:
                 issues.append(f"forbidden_term:{term!r}")
 
-    # Check 3: wrong pronouns for genre
+    # Check 5: wrong pronouns for genre
     if genre in _WRONG_PRONOUN_GENRES:
         pronoun_count = _count_wrong_pronouns(text)
         if pronoun_count >= 3:
             issues.append(f"wrong_pronoun:{pronoun_count}")
 
-    # Check 4: untranslated English blocks
+    # Check 6: untranslated English blocks
     en_blocks = _EN_BLOCK_RE.findall(text)
     if en_blocks:
         issues.append(f"large_en_block:{len(en_blocks)}")

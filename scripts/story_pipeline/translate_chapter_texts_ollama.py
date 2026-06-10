@@ -29,6 +29,19 @@ from story_memory import (
     story_memory_status,
 )
 
+try:
+    from check_translation_quality import (
+        BLOCKING_QUALITY_ISSUES as _TRANS_BLOCKING,
+        check_polished_quality as _trans_check_quality,
+        issue_to_repair_hint as _trans_repair_hint,
+    )
+    _TRANS_QUALITY_AVAILABLE = True
+except ImportError:
+    _TRANS_QUALITY_AVAILABLE = False
+    _TRANS_BLOCKING: frozenset = frozenset()
+    def _trans_check_quality(*a, **k): return []  # type: ignore[misc]
+    def _trans_repair_hint(i: str) -> str: return i  # type: ignore[misc]
+
 
 CHAPTER_PATTERN = re.compile(r"chapter(\d+)\.txt$", re.IGNORECASE)
 
@@ -131,6 +144,21 @@ Hard rules:
 2. A younger character addressing an older/respected person must not use "mày/tao" unless the source explicitly shows hostile defiance.
 3. The same character may address different people differently: allies, elders, superiors, family, strangers, and enemies do not share one fixed pronoun pair.
 4. If a character map includes per-target addressing rules, those override all general rules."""
+
+# Dùng khi chunk dịch fail quality check — retry với repair hints cụ thể.
+TRANSLATE_REPAIR_TEMPLATE = """Dịch lại đoạn văn sau sang tiếng Việt — phiên bản trước còn lỗi:
+
+{repair_hints}
+{preceding_section}
+Yêu cầu:
+- Dịch toàn bộ sang tiếng Việt tự nhiên, không để sót ký tự tiếng Anh/Trung/Hàn
+- Không lặp đoạn văn
+- Giữ đầy đủ nghĩa gốc, đúng thứ tự, đúng tên nhân vật
+- Chỉ trả về bản dịch tiếng Việt; không ghi chú, không giải thích
+
+Đoạn cần dịch lại:
+{text}
+"""
 
 TRANSLATEGEMMA_TEMPLATE = """You are a professional literary translator: Chinese/Korean/English → Vietnamese for audiobook narration. Your primary goal is natural, literary Vietnamese prose that reads as if written by a Vietnamese author — never a mechanical or word-for-word translation.
 
@@ -301,6 +329,7 @@ def build_messages(
     preceding_context: str = "",
     story_memory_context: str = "",
     no_think: bool = True,
+    repair_hints: str = "",
 ) -> list[dict[str, str]]:
     focused_char_map = filter_char_map_for_text(
         char_map,
@@ -338,11 +367,20 @@ def build_messages(
             "Chúng ghi đè quy tắc chung nếu mâu thuẫn:\n"
             f"{story_memory_context}"
         )
-    user_content = (
-        QWEN_USER_WITH_CONTEXT_TEMPLATE.format(preceding_context=preceding_context, text=text)
-        if preceding_context
-        else QWEN_USER_TEMPLATE.format(text=text)
-    )
+    if repair_hints:
+        preceding_section = (
+            f"\nNgữ cảnh đoạn trước (CHỈ tham khảo, không dịch lại):\n---\n{preceding_context}\n---\n"
+            if preceding_context else ""
+        )
+        user_content = TRANSLATE_REPAIR_TEMPLATE.format(
+            repair_hints=repair_hints, preceding_section=preceding_section, text=text
+        )
+    else:
+        user_content = (
+            QWEN_USER_WITH_CONTEXT_TEMPLATE.format(preceding_context=preceding_context, text=text)
+            if preceding_context
+            else QWEN_USER_TEMPLATE.format(text=text)
+        )
     if no_think and "qwen3" in model.lower():
         user_content = "/no_think\n\n" + user_content
     return [
@@ -366,12 +404,13 @@ def call_ollama(
     story_memory_context: str = "",
     session: requests.Session | None = None,
     no_think: bool = True,
+    repair_hints: str = "",
 ) -> str:
     url = base_url.rstrip("/") + "/api/chat"
     payload: dict[str, Any] = {
         "model": model,
         "stream": False,
-        "messages": build_messages(model, text, genre, char_map, preceding_context, story_memory_context, no_think=no_think),
+        "messages": build_messages(model, text, genre, char_map, preceding_context, story_memory_context, no_think=no_think, repair_hints=repair_hints),
         "options": {
             "temperature": temperature,
             "num_ctx": num_ctx,
@@ -445,6 +484,7 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
 
     translated_chunks: list[str] = []
     preceding_context = ""
+    max_quality_retries = getattr(args, "max_quality_retries", 2)
     with requests.Session() as session:
         for idx, chunk in enumerate(chunks, start=1):
             print(f"[{idx}/{len(chunks)}] Translate {len(chunk)} chars with {args.model}" + (f" +ctx={len(preceding_context)}c" if preceding_context else ""))
@@ -453,30 +493,50 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
                 f"{preceding_context}\n\n{chunk}".strip(),
                 genre=genre,
             )
-            translated = call_ollama(
-                base_url=args.ollama_url,
-                model=args.model,
-                text=chunk,
-                temperature=args.temperature,
-                num_ctx=args.num_ctx,
-                timeout=args.timeout,
-                retries=args.retries,
-                keep_alive=getattr(args, "keep_alive", "30m"),
-                genre=genre,
-                char_map=char_map,
-                preceding_context=preceding_context,
-                story_memory_context=story_memory_context,
-                session=session,
-            )
-            translated = apply_story_memory_replacements(translated, story_memory)
-            if output_too_short(chunk, translated):
-                src_len = len(re.sub(r"\s+", "", chunk))
-                out_len = len(re.sub(r"\s+", "", translated))
-                print(
-                    f"[QUALITY WARN] translate chunk {idx}/{len(chunks)}: "
-                    f"output ({out_len} chars) < 55% of input ({src_len} chars) — "
-                    f"có thể bị bỏ sót nội dung"
+
+            translated = ""
+            repair_hints_for_chunk = ""
+            for q_attempt in range(max_quality_retries + 1):
+                translated = call_ollama(
+                    base_url=args.ollama_url,
+                    model=args.model,
+                    text=chunk,
+                    temperature=args.temperature,
+                    num_ctx=args.num_ctx,
+                    timeout=args.timeout,
+                    retries=args.retries,
+                    keep_alive=getattr(args, "keep_alive", "30m"),
+                    genre=genre,
+                    char_map=char_map,
+                    preceding_context=preceding_context,
+                    story_memory_context=story_memory_context,
+                    session=session,
+                    repair_hints=repair_hints_for_chunk,
                 )
+                translated = apply_story_memory_replacements(translated, story_memory)
+
+                if output_too_short(chunk, translated):
+                    src_len = len(re.sub(r"\s+", "", chunk))
+                    out_len = len(re.sub(r"\s+", "", translated))
+                    print(
+                        f"[QUALITY WARN] translate chunk {idx}/{len(chunks)}: "
+                        f"output ({out_len} chars) < 55% of input ({src_len} chars) — "
+                        f"có thể bị bỏ sót nội dung"
+                    )
+                    break
+
+                if _TRANS_QUALITY_AVAILABLE and _TRANS_BLOCKING:
+                    q_issues = _trans_check_quality(translated, genre=genre, char_map_path=char_map_file)
+                    blocking = [i for i in q_issues if any(i.startswith(b) for b in _TRANS_BLOCKING)]
+                    if blocking:
+                        if q_attempt >= max_quality_retries:
+                            print(f"[QUALITY_FAIL] translate chunk {idx}/{len(chunks)}: {blocking} (gave up after {max_quality_retries} retries)")
+                        else:
+                            print(f"[QUALITY_RETRY] translate chunk {idx}/{len(chunks)} attempt {q_attempt + 1}: {blocking}")
+                            repair_hints_for_chunk = "\n".join(f"- {_trans_repair_hint(i)}" for i in blocking)
+                            continue
+                break
+
             translated_chunks.append(translated)
             preceding_context = _tail_context(translated)
 
@@ -494,6 +554,36 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
             raise RuntimeError(f"Story memory QA failed for {input_path.name}: {memory_issues[:5]}")
     output_path.write_text(final_text + "\n", encoding="utf-8")
     print(f"Đã lưu: {output_path}")
+    _sync_translated_to_db(input_path, output_path, final_text)
+
+
+def _sync_translated_to_db(input_path: Path, output_path: Path, content: str) -> None:
+    try:
+        from story_db.story_pipeline_db import repository as repo
+        from story_db.story_pipeline_db.db import connect
+        candidates = [str(input_path), str(input_path.resolve())]
+        try:
+            from pathlib import Path as _P
+            candidates.append(str(input_path.resolve().relative_to(_P(__file__).resolve().parents[2])))
+        except ValueError:
+            pass
+        with connect() as conn:
+            row = conn.execute(
+                """
+                UPDATE chapters
+                SET translated_text_path = %s,
+                    translated_text_content = COALESCE(%s::text, translated_text_content),
+                    is_translated = TRUE,
+                    updated_at = now()
+                WHERE raw_text_path = ANY(%s)
+                RETURNING id
+                """,
+                (output_path.as_posix(), content, candidates),
+            ).fetchone()
+        if row:
+            print(f"[DB] synced translated chapter: {input_path.name}")
+    except Exception as exc:
+        print(f"[DB WARN] không sync được translated path: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -769,8 +859,18 @@ def single_pass_translate_polish_file(
             print(f"  - ... {len(memory_issues) - 12} more")
         if getattr(args, "fail_on_story_memory_issues", False):
             raise RuntimeError(f"Story memory QA failed for {input_path.name}: {memory_issues[:5]}")
+    if _TRANS_QUALITY_AVAILABLE:
+        sp_q_issues = _trans_check_quality(final_text, genre=genre, char_map_path=char_map_file)
+        if sp_q_issues:
+            blocking_sp = [i for i in sp_q_issues if any(i.startswith(b) for b in _TRANS_BLOCKING)]
+            warn_sp = [i for i in sp_q_issues if i not in blocking_sp]
+            if blocking_sp:
+                print(f"[QUALITY_FAIL] {input_path.name} single-pass: {', '.join(blocking_sp)}")
+            if warn_sp:
+                print(f"[QUALITY_WARN] {input_path.name} single-pass: {', '.join(warn_sp)}")
     output_path.write_text(final_text + "\n", encoding="utf-8")
     print(f"Đã lưu (single-pass): {output_path}")
+    _sync_translated_to_db(input_path, output_path, final_text)
 
 
 def main() -> None:
@@ -791,6 +891,8 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--keep-alive", default="30m")
+    parser.add_argument("--max-quality-retries", type=int, default=2,
+                        help="Số lần retry khi chunk translate fail quality check (CJK/EN còn sót, sai đại từ...). Default: 2.")
     parser.add_argument("--max-chars-per-chunk", type=int, default=2500)
     parser.add_argument(
         "--genre",

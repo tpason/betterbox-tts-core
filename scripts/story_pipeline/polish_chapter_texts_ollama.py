@@ -24,6 +24,18 @@ from genre_prompts import (
     apply_aliases,
 )
 from reader_content_format import format_polished_content as format_reader_polished_content
+try:
+    from check_translation_quality import (
+        BLOCKING_QUALITY_ISSUES,
+        check_polished_quality as _ext_check_quality,
+        issue_to_repair_hint,
+    )
+    _QUALITY_RETRY_AVAILABLE = True
+except ImportError:
+    BLOCKING_QUALITY_ISSUES = frozenset()
+    _QUALITY_RETRY_AVAILABLE = False
+    def _ext_check_quality(*args, **kwargs): return []  # type: ignore[misc]
+    def issue_to_repair_hint(issue: str) -> str: return issue  # type: ignore[misc]
 from story_memory import (
     apply_story_memory_replacements,
     build_story_memory_prompt,
@@ -214,6 +226,25 @@ Giữ đủ nghĩa, đủ chi tiết, đúng thứ tự. Chỉ trả về nội 
 {text}
 """
 
+# Dùng khi chunk bị quality check fail và cần retry với feedback cụ thể.
+# {preceding_section} là optional — trống nếu không có preceding context.
+QUALITY_REPAIR_USER_TEMPLATE = """Biên tập lại đoạn truyện sau — phiên bản trước còn lỗi cần sửa:
+
+{repair_hints}
+{preceding_section}
+Yêu cầu:
+- Sửa toàn bộ các lỗi nêu trên
+- Toàn bộ nội dung bằng tiếng Việt tự nhiên, đọc như văn tác giả viết, không dấu vết dịch máy
+- Không để sót ký tự tiếng Trung/Hàn/Anh chưa dịch
+- Không lặp đoạn văn
+- Tuân thủ char map và giọng văn từ ngữ cảnh trước nếu có
+- Giữ đầy đủ nội dung gốc, đúng thứ tự
+- Chỉ trả về nội dung đã biên tập; không ghi chú, không giải thích
+
+Đoạn gốc cần biên tập:
+{text}
+"""
+
 
 def chapter_number(path: Path) -> int:
     match = CHAPTER_PATTERN.match(path.name)
@@ -347,6 +378,7 @@ def build_messages(
     char_map: str = "",
     preceding_context: str = "",
     story_memory_context: str = "",
+    repair_hints: str = "",
 ) -> list[dict[str, str]]:
     addendum = get_polish_genre_addendum(genre)
     focused_char_map = filter_char_map_for_text(
@@ -364,7 +396,16 @@ def build_messages(
                 "Chúng ghi đè quy tắc chung nếu mâu thuẫn:\n"
                 f"{story_memory_context}"
             )
-        if preceding_context:
+        if repair_hints:
+            preceding_section = (
+                f"\nNgữ cảnh đoạn trước (CHỈ tham khảo giọng văn, không biên tập lại):\n"
+                f"---\n{preceding_context}\n---\n"
+                if preceding_context else ""
+            )
+            user_content = QUALITY_REPAIR_USER_TEMPLATE.format(
+                repair_hints=repair_hints, preceding_section=preceding_section, text=text
+            )
+        elif preceding_context:
             user_content = FAST_USER_PROMPT_WITH_CONTEXT_TEMPLATE.format(
                 preceding_context=preceding_context, text=text
             )
@@ -384,7 +425,16 @@ def build_messages(
             "Chúng ghi đè quy tắc chung nếu mâu thuẫn:\n"
             f"{story_memory_context}"
         )
-    if preceding_context:
+    if repair_hints:
+        preceding_section = (
+            f"\nNgữ cảnh đoạn trước (CHỈ tham khảo giọng văn, không biên tập lại):\n"
+            f"---\n{preceding_context}\n---\n"
+            if preceding_context else ""
+        )
+        user_content = QUALITY_REPAIR_USER_TEMPLATE.format(
+            repair_hints=repair_hints, preceding_section=preceding_section, text=text
+        )
+    elif preceding_context:
         user_content = USER_PROMPT_WITH_CONTEXT_TEMPLATE.format(
             preceding_context=preceding_context, text=text
         )
@@ -539,6 +589,22 @@ def clean_for_audiobook_tts(text: str) -> str:
     text = re.sub(r"\?{2,}", "?", text)
     text = re.sub(r"([!?]){2,}", r"\1", text)
 
+    # Xóa dấu phẩy giữa các âm tiết ngắn lặp lại: "Ừ, ừ" → "Ừ ừ", "Ha, ha" → "Ha ha".
+    # Lý do: TTS đọc dấu phẩy như khoảng dừng rõ ràng, tạo prosody giật cục cho grunt/laugh/sob.
+    # Pattern: 1-4 ký tự (kể dấu thanh) lặp lại 2+ lần, cách nhau bằng ", ".
+    # Giới hạn 1-4 ký tự để tránh nhầm với "Không, không!" (5 ký tự — emphatic negation cần giữ).
+    def _dedup_short_syllable(m: re.Match) -> str:
+        syllable = m.group(1)  # giữ nguyên case của lần xuất hiện đầu tiên
+        count = m.group(0).count(",") + 1
+        return " ".join([syllable] + [syllable.lower()] * (count - 1))
+
+    text = re.sub(
+        r"\b(\w{1,4})(?:,\s+\1)+(?=\b|[.!?,])",
+        _dedup_short_syllable,
+        text,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+
     # Dấu câu Trung nếu còn sót.
     text = text.replace("。", ".")
     text = text.replace("，", ",")
@@ -553,6 +619,35 @@ def clean_for_audiobook_tts(text: str) -> str:
     # Thêm space sau dấu câu nếu bị dính chữ.
     text = re.sub(r"([!?;:])(?=\S)", r"\1 ", text)
     text = re.sub(r"([,.])(?=[A-Za-zÀ-ỹ])", r"\1 ", text)
+
+    # Thay thế âm thanh tiếng Anh bằng từ tương đương tiếng Việt (chỉ khi theo sau bởi !).
+    # Giới hạn ở context "!" để tránh nhầm với tên nhân vật hoặc từ bình thường.
+    _EN_SOUND_MAP = {
+        "Swish": "Xoẹt",
+        "Swoosh": "Vù",
+        "Whoosh": "Vù",
+        "Bang": "Đùng",
+        "Boom": "Ầm",
+        "Crash": "Rầm",
+        "Thud": "Bụp",
+        "Thump": "Bịch",
+        "Crack": "Rắc",
+        "Snap": "Rắc",
+        "Slash": "Xoẹt",
+        "Smash": "Rầm",
+        "Clang": "Keng",
+        "Clank": "Keng",
+        "Zap": "Vút",
+        "Pop": "Bốp",
+        "Splat": "Bịch",
+    }
+    for en_word, vi_word in _EN_SOUND_MAP.items():
+        text = re.sub(
+            rf"\b{re.escape(en_word)}\b",
+            vi_word,
+            text,
+            flags=re.IGNORECASE,
+        )
 
     # Tách âm báo cho TTS.
     sound_words = [
@@ -594,6 +689,19 @@ def clean_for_audiobook_tts(text: str) -> str:
 
     # Trim từng dòng.
     lines = [line.strip() for line in text.split("\n")]
+
+    # Strip artifact ". " đầu dòng thoại do ellipsis normalization tạo ra.
+    # Ví dụ: '"... Dù chuyện"' → sau ellipsis rule → '". Dù chuyện"' → fix → '"Dù chuyện"'
+    # Tương tự cho dòng narrative bắt đầu bằng dấu câu trơ.
+    _LEADING_SENT_PUNCT_RE = re.compile(r'^"([.\s]+)')
+    cleaned_lines = []
+    for line in lines:
+        # Dialogue: '". text"' -> '"text"'
+        line = _LEADING_SENT_PUNCT_RE.sub('"', line)
+        # Narrative: '. text' hoặc '. . text' ở đầu dòng
+        line = re.sub(r'^[.\s]+(?=[^\s.])', '', line)
+        cleaned_lines.append(line)
+    lines = cleaned_lines
 
     # Giữ tối đa một dòng trống liên tiếp.
     final_lines = []
@@ -648,9 +756,10 @@ def call_ollama(
     story_memory_context: str = "",
     session: requests.Session | None = None,
     no_think: bool = True,
+    repair_hints: str = "",
 ) -> str:
     url = base_url.rstrip("/") + "/api/chat"
-    messages = build_messages(text, prompt_profile, genre, char_map, preceding_context, story_memory_context)
+    messages = build_messages(text, prompt_profile, genre, char_map, preceding_context, story_memory_context, repair_hints)
     # Disable Qwen3 thinking mode for polish: rewriting doesn't need deep reasoning,
     # and thinking tokens eat into context window leaving less room for content.
     if no_think and "qwen3" in model.lower():
@@ -768,7 +877,7 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
 
     min_ratio = getattr(args, "min_output_ratio", 0.70)
 
-    def _call_polish(text: str, preceding: str, smc: str) -> str:
+    def _call_polish(text: str, preceding: str, smc: str, repair_hints: str = "") -> str:
         result = call_ollama(
             base_url=args.ollama_url,
             model=args.model,
@@ -785,6 +894,7 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
             story_memory_context=smc,
             session=session,
             no_think=True,
+            repair_hints=repair_hints,
         )
         result = apply_story_memory_replacements(result, story_memory)
         result = clean_for_audiobook_tts(result)
@@ -817,6 +927,7 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
             sub_preceding = _tail_context(parts[-1])
         return "\n\n".join(parts)
 
+    max_quality_retries = getattr(args, "max_quality_retries", 2)
     polished_chunks: list[str] = []
     preceding_context = ""
     with requests.Session() as session:
@@ -827,21 +938,57 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
                 f"{preceding_context}\n\n{chunk}".strip(),
                 genre=genre,
             )
-            polished = _call_polish(chunk, preceding_context, story_memory_context)
-            if has_editorial_noise(polished):
-                print(f"[WARN] Polish chunk {idx} có editorial noise; retry với sub-chunks.")
-                polished = _retry_with_sub_chunks(chunk, preceding_context, f"{idx}/{len(chunks)}")
-            elif output_too_short(chunk, polished, min_ratio):
-                print(f"[WARN] Polish chunk {idx} ngắn bất thường; retry với sub-chunks.")
-                polished = _retry_with_sub_chunks(chunk, preceding_context, f"{idx}/{len(chunks)}")
-            polished_chunks.append(polished)
+
+            polished: str | None = None
+            repair_hints_for_chunk = ""
+            for q_attempt in range(max_quality_retries + 1):
+                attempt = _call_polish(chunk, preceding_context, story_memory_context, repair_hints=repair_hints_for_chunk)
+
+                # Existing checks: editorial noise and length — always use sub-chunk retry, no quality retry
+                if has_editorial_noise(attempt):
+                    print(f"[WARN] Polish chunk {idx} có editorial noise; retry với sub-chunks.")
+                    polished = _retry_with_sub_chunks(chunk, preceding_context, f"{idx}/{len(chunks)}")
+                    break
+                if output_too_short(chunk, attempt, min_ratio):
+                    print(f"[WARN] Polish chunk {idx} ngắn bất thường; retry với sub-chunks.")
+                    polished = _retry_with_sub_chunks(chunk, preceding_context, f"{idx}/{len(chunks)}")
+                    break
+
+                # Quality check: detect blocking issues and retry with repair prompt
+                if _QUALITY_RETRY_AVAILABLE and BLOCKING_QUALITY_ISSUES:
+                    q_issues = _ext_check_quality(attempt, genre=genre, char_map_path=char_map_file)
+                    blocking = [i for i in q_issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
+                    if blocking:
+                        if q_attempt >= max_quality_retries:
+                            print(f"[QUALITY_FAIL] chunk {idx}/{len(chunks)}: {blocking} (gave up after {max_quality_retries} retries)")
+                        else:
+                            print(f"[QUALITY_RETRY] chunk {idx}/{len(chunks)} attempt {q_attempt + 1}: {blocking}")
+                            repair_hints_for_chunk = "\n".join(f"- {issue_to_repair_hint(i)}" for i in blocking)
+                            continue
+
+                polished = attempt
+                break
+
+            polished_chunks.append(polished or "")
             # Cập nhật preceding context từ kết quả vừa polish
-            preceding_context = _tail_context(polished)
+            preceding_context = _tail_context(polished or "")
 
     final_text = "\n\n".join(polished_chunks)
     final_text = apply_story_memory_replacements(final_text, story_memory)
     final_text = clean_for_audiobook_tts(final_text)
     final_text = format_reader_polished_content(final_text, {})
+
+    # Final chapter-level quality check — catches cross-chunk issues (e.g. repeated_content
+    # spanning two chunks) that per-chunk retry couldn't see.
+    if _QUALITY_RETRY_AVAILABLE:
+        final_q_issues = _ext_check_quality(final_text, genre=genre, char_map_path=char_map_file)
+        if final_q_issues:
+            blocking_final = [i for i in final_q_issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
+            warn_only = [i for i in final_q_issues if i not in blocking_final]
+            if blocking_final:
+                print(f"[QUALITY_FAIL] {input_path.name} final: {', '.join(blocking_final)}")
+            if warn_only:
+                print(f"[QUALITY_WARN] {input_path.name} final: {', '.join(warn_only)}")
 
     issues = validate_tts_text(final_text)
     if issues:
@@ -955,6 +1102,16 @@ def main() -> None:
         "--genre",
         default="",
         help="Thể loại truyện: tien_hiep, huyen_huyen, he_thong, kiem_hiep, do_thi, xuyen_khong, mat_the, vong_du, lang_man, western_fantasy. Để trống để dùng prompt mặc định.",
+    )
+    parser.add_argument(
+        "--max-quality-retries",
+        type=int,
+        default=2,
+        help=(
+            "Số lần retry tối đa khi một chunk bị quality check fail (not_vietnamese, "
+            "cjk_not_translated, repeated_content, large_en_block). Mỗi retry dùng repair prompt "
+            "với mô tả lỗi cụ thể. 0 = tắt quality retry (chỉ log). Default: 2."
+        ),
     )
     args = parser.parse_args()
 
