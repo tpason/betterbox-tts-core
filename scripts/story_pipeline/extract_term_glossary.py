@@ -208,7 +208,7 @@ def call_ollama_glossary(
     genre: str,
     temperature: float = 0.1,
     num_ctx: int = 8192,
-    timeout: int = 300,
+    timeout: int = 600,
 ) -> list[dict[str, Any]]:
     term_block = "\n".join(
         f'- "{c["term"]}"' + (f' — ngữ cảnh: {c["context"]}' if c.get("context") else "")
