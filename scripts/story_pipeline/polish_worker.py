@@ -688,6 +688,7 @@ def _gated_pass(
     label: str,
     story_id: str = "",
     slug: str = "",
+    cleanup_on_fail: tuple[Path, ...] = (),
 ) -> str:
     """Run an LLM pass with a chapter-level quality gate.
 
@@ -723,6 +724,14 @@ def _gated_pass(
             return text
         if attempt < attempts:
             log(f"[QUALITY_GATE] {label}: re-run {attempt}/{retries} — {', '.join(blocking)}")
+    # Xóa output hỏng trên disk — nếu để lại, lần retry job sau sẽ dính nhánh
+    # skip-exists và ghi thẳng output hỏng vào DB, bypass toàn bộ gate.
+    for p in cleanup_on_fail:
+        try:
+            p.unlink(missing_ok=True)
+            log(f"[QUALITY_GATE] {label}: removed failed output {p}")
+        except OSError as exc:
+            log(f"[QUALITY_GATE] {label}: cannot remove {p}: {exc}")
     raise QualityGateError(f"quality_gate {label}: {', '.join(blocking)}")
 
 
@@ -920,27 +929,45 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     )
 
     if output_path.exists() and not args.overwrite:
-        log(f"[SKIP] output exists: {output_path}")
-        translated_path = None
-        if raw_language in {"zh", "cn", "ko", "kr", "en"}:
-            translated_path = (
-                payload.get("translated_text_path")
-                or (Path(args.translated_output_root) / story_slug_for_job(job, input_path) / output_path.name).as_posix()
+        # Output cũ cũng phải qua quality gate trước khi ghi DB — output hỏng
+        # (từ run cũ hoặc trước khi có gate) sẽ rơi xuống re-run thay vì skip.
+        existing_polished = read_formatted_polished_output(output_path, job, write_back=False)
+        existing_blocking: list[str] = []
+        if str(getattr(args, "quality_gate", "block") or "block").lower() == "block":
+            existing_blocking, _ = _quality_check(
+                existing_polished,
+                genre,
+                effective_char_map or "",
+                f"existing ch{current_chapter}",
+                story_id=story_id,
+                slug=job_slug,
+                story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
             )
-        repo.update_chapter_text_outputs(
-            job["chapter_id"],
-            translated_text_path=translated_path,
-            polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
-            translated_text_content=Path(translated_path).read_text(encoding="utf-8") if translated_path and Path(translated_path).exists() else None,
-            polished_text_content=read_formatted_polished_output(output_path, job, write_back=False),
-        )
-        if translated_path and Path(translated_path).exists():
-            maybe_update_translated_chapter_title(
-                job,
-                read_formatted_output(Path(translated_path), job, write_back=False, label="translated"),
+        if existing_blocking:
+            log(f"[QUALITY_GATE] existing output failed check → re-running pass: {output_path}")
+            output_path.unlink(missing_ok=True)
+        else:
+            log(f"[SKIP] output exists: {output_path}")
+            translated_path = None
+            if raw_language in {"zh", "cn", "ko", "kr", "en"}:
+                translated_path = (
+                    payload.get("translated_text_path")
+                    or (Path(args.translated_output_root) / story_slug_for_job(job, input_path) / output_path.name).as_posix()
+                )
+            repo.update_chapter_text_outputs(
+                job["chapter_id"],
+                translated_text_path=translated_path,
+                polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
+                translated_text_content=Path(translated_path).read_text(encoding="utf-8") if translated_path and Path(translated_path).exists() else None,
+                polished_text_content=existing_polished,
             )
-        repo.complete_story_job(job["id"], result_payload={"skipped": "output_exists"})
-        return
+            if translated_path and Path(translated_path).exists():
+                maybe_update_translated_chapter_title(
+                    job,
+                    read_formatted_output(Path(translated_path), job, write_back=False, label="translated"),
+                )
+            repo.complete_story_job(job["id"], result_payload={"skipped": "output_exists"})
+            return
 
     def _build_args_with_char_map(model: str, max_chars: int, genre: str = "") -> Namespace:
         ns = build_args(args, model, max_chars, genre, story_id=story_id, story_slug=job_slug)
@@ -966,6 +993,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"vi ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            cleanup_on_fail=(output_path,),
         )
         repo.update_chapter_text_outputs(
             job["chapter_id"],
@@ -990,6 +1018,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"single-pass ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            cleanup_on_fail=(output_path,),
         )
         repo.update_chapter_text_outputs(
             job["chapter_id"],
@@ -1044,6 +1073,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"translate ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            cleanup_on_fail=(translated_path,),
         )
         translated_chapter_title = maybe_update_translated_chapter_title(job, translated_text_content)
         effective_char_map = maybe_auto_update_char_map(
@@ -1079,6 +1109,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 label=f"copy ch{current_chapter}",
                 story_id=story_id,
                 slug=job_slug,
+                cleanup_on_fail=(output_path, translated_path) if no_save else (output_path,),
             )
         else:
             # Unload translate model trước khi load polish model để tránh chiếm VRAM cùng lúc.
@@ -1100,6 +1131,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 label=f"two-pass ch{current_chapter}",
                 story_id=story_id,
                 slug=job_slug,
+                cleanup_on_fail=(output_path, translated_path) if no_save else (output_path,),
             )
         # Discard temp translated file only after polish finishes reading it.
         if no_save:
