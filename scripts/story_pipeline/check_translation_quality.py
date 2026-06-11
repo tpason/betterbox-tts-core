@@ -92,9 +92,11 @@ def issue_to_repair_hint(issue: str) -> str:
 # ── Patterns ────────────────────────────────────────────────────────────────
 
 # Hán Việt pronouns that shouldn't appear in western_fantasy/do_thi narrative
-_WRONG_PRONOUN_GENRES = {"western_fantasy", "do_thi", "lang_man"}
-# Match "hắn/nàng/lão/y" as standalone words in narrative (outside quoted dialogue)
-_WRONG_PRONOUN_RE = re.compile(r"\b(hắn|nàng|lão|y)\b")
+_WRONG_PRONOUN_GENRES = {"western_fantasy", "do_thi", "lang_man", "korean_cultivation"}
+# Match "hắn/nàng/lão/y" as standalone words in narrative (outside quoted dialogue).
+# Capitalized Hắn/Nàng cũng là pronoun (đầu câu — rất phổ biến); Lão/Y hoa KHÔNG
+# tính vì có thể là title trước tên riêng (Lão Trần) hoặc tên viết tắt.
+_WRONG_PRONOUN_RE = re.compile(r"\b(hắn|Hắn|nàng|Nàng|lão|y)\b")
 # Compound nouns that legitimately contain lão/y — not pronoun usage
 # e.g. trưởng lão (elder), ông lão (old man), y tá (nurse), y học (medicine)
 _COMPOUND_NOUN_RE = re.compile(
@@ -442,13 +444,18 @@ _DIALOGUE_STARTS = ('"', "'", "“", "‘", "—", "[")
 
 _PRONOUN_FIXES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bhắn\b"), "anh ta"),
+    (re.compile(r"\bHắn\b"), "Anh ta"),
     (re.compile(r"\bnàng\b"), "cô ấy"),
+    # Nàng hoa đầu câu — guard: không thay khi đứng trước tên riêng (Nàng Bạch Tuyết)
+    (re.compile(r"\bNàng\b(?!\s+[A-ZÀ-Ỹ])"), "Cô ấy"),
 ]
 _SAFE_PRONOUN_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
     # standalone 'y' pronoun (he/him archaic) — skip compound nouns (y tá, y học...)
     (re.compile(r"\by\b"), "anh ta"),
     # standalone 'lão' pronoun (he/the old one) — skip compound nouns (trưởng lão, lão nhân...)
     (re.compile(r"\blão\b"), "ông ta"),
+    # Lão hoa đầu câu — guard: không thay khi là title trước tên riêng (Lão Trần)
+    (re.compile(r"\bLão\b(?!\s+[A-ZÀ-Ỹ])"), "Ông ta"),
 ]
 
 

@@ -26,7 +26,14 @@ from extract_char_map import update_char_map_incremental
 from polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from reader_content_format import format_polished_content as format_reader_polished_content
 from translate_chapter_texts_ollama import single_pass_translate_polish_file, translate_file
-from check_translation_quality import BLOCKING_QUALITY_ISSUES, check_polished_quality
+from check_translation_quality import (
+    BLOCKING_QUALITY_ISSUES,
+    _WRONG_PRONOUN_GENRES,
+    _fix_pronouns_in_text,
+    check_polished_quality,
+)
+from story_memory import find_story_memory_quality_issues, load_story_memory
+from extract_term_glossary import glossary_path_for, update_term_glossary
 
 
 def story_slug_for_job(job: dict, input_path: Path) -> str:
@@ -533,20 +540,190 @@ def read_formatted_polished_output(output_path: Path, job: dict, *, write_back: 
     return read_formatted_output(output_path, job, write_back=write_back, label="polished")
 
 
-def _quality_warn(text: str, genre: str, char_map: str, label: str) -> list[str]:
-    """Check quality and log. Returns list of issues found (empty = OK).
-    Blocking issues are logged at [QUALITY_FAIL]; others at [QUALITY_WARN].
+def maybe_auto_update_term_glossary(
+    job: dict,
+    args: argparse.Namespace,
+    *,
+    slug: str,
+    current_chapter: int,
+    genre: str,
+) -> None:
+    """Auto seed/update terminology glossary cho story memory. Never fail the job.
+
+    - Seed: chưa có glossary.json → mine từ raw chapters 1..max(10, current).
+    - Incremental: mỗi --glossary-update-interval chapters, mine terms mới.
+    Glossary được story_memory inject tự động vào translate + polish, và
+    quality gate enforce wrong_translations/forbidden.
+    """
+    if getattr(args, "no_auto_glossary", False):
+        return
+    story_id = str(job.get("story_id") or "")
+    if not story_id or current_chapter <= 0:
+        return
+    try:
+        interval = max(5, int(getattr(args, "glossary_update_interval", 20)))
+        story = repo.get_story_by_id(story_id)
+        metadata = story.get("metadata") or {}
+        failed_at = int(metadata.get("glossary_failed_at_chapter") or 0)
+        if failed_at and current_chapter < failed_at + interval:
+            return
+        g_path = glossary_path_for(story_id, slug)
+        updated_to = int(metadata.get("glossary_updated_to_chapter") or 0)
+
+        if not g_path.exists():
+            from_chapter, to_chapter = 1, max(10, current_chapter)
+            label = "seed"
+        elif current_chapter >= updated_to + interval:
+            from_chapter, to_chapter = max(1, updated_to + 1), current_chapter
+            label = "incremental"
+        else:
+            return
+
+        log(f"[GLOSSARY] auto-{label} story={story_id} ch{from_chapter}-{to_chapter}")
+        result = update_term_glossary(
+            story_id=story_id,
+            from_chapter=from_chapter,
+            to_chapter=to_chapter,
+            text_source="raw",
+            ollama_url=args.ollama_url,
+            model=args.translate_model or "qwen3:14b",
+            genre=genre,
+        )
+        if result.get("status") == "ok":
+            log(f"[GLOSSARY] auto-{label}: +{result.get('added', 0)} terms (total {result.get('total', 0)})")
+        # update_term_glossary tự ghi glossary_updated_to_chapter; với no_new_terms
+        # vẫn bump để không re-scan cùng khoảng chương mỗi job.
+        if result.get("status") in {"ok", "no_new_terms"}:
+            repo.update_story_metadata(story_id, {"glossary_updated_to_chapter": int(to_chapter)})
+    except Exception as exc:  # noqa: BLE001 — glossary là enhancement, không chặn pipeline
+        log(f"[GLOSSARY] auto-update failed (cooldown {getattr(args, 'glossary_update_interval', 20)} chapters): {exc}")
+        try:
+            repo.update_story_metadata(story_id, {"glossary_failed_at_chapter": int(current_chapter)})
+        except Exception:
+            pass
+
+
+class QualityGateError(RuntimeError):
+    """Raised when output still has blocking quality issues after all retries.
+
+    run_one() catches this and fails the job — content is NOT written to DB.
+    """
+
+
+def _fix_pronouns_for_genre(text: str, genre: str, output_path: Path | None) -> str:
+    """Deterministic post-fix: hắn→anh ta, nàng→cô ấy... cho genre cấm đại từ cổ phong.
+
+    Chạy TRƯỚC quality gate (giảm false gate-fail vì wrong_pronoun) và ghi lại file
+    output để file trên disk và DB content luôn cùng một bản — audio pipeline đọc
+    polished_text_path khi file tồn tại.
+    """
+    if not text or genre not in _WRONG_PRONOUN_GENRES:
+        return text
+    try:
+        fixed, n_fixed = _fix_pronouns_in_text(text)
+    except Exception as exc:  # noqa: BLE001 — fix là enhancement, không chặn pipeline
+        log(f"[PRONOUN_FIX WARN] {exc}")
+        return text
+    if n_fixed <= 0:
+        return text
+    log(f"[PRONOUN_FIX] fixed {n_fixed} pronouns ({genre})")
+    if output_path is not None:
+        try:
+            output_path.write_text(fixed.strip() + "\n", encoding="utf-8")
+        except OSError as exc:
+            log(f"[PRONOUN_FIX WARN] cannot write back {output_path}: {exc}")
+    return fixed
+
+
+def _quality_check(
+    text: str,
+    genre: str,
+    char_map: str,
+    label: str,
+    *,
+    story_id: str = "",
+    slug: str = "",
+    story_memory_dir: str = "",
+) -> tuple[list[str], list[str]]:
+    """Check quality and log. Returns (blocking, warnings).
+
+    Blocking = BLOCKING_QUALITY_ISSUES + story-memory term/name drift (glossary
+    forbidden terms). Register/format drift from story memory chỉ là warning.
     """
     issues = check_polished_quality(text, genre=genre, char_map_path=char_map)
-    if not issues:
-        return []
     blocking = [i for i in issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
     warnings = [i for i in issues if i not in blocking]
+
+    # Story-memory QA: glossary forbidden terms / wrong name spellings là blocking.
+    try:
+        memory = load_story_memory(
+            story_memory_dir=story_memory_dir,
+            story_id=story_id,
+            slug=slug,
+            char_map_file=char_map,
+        )
+        if memory.loaded:
+            for issue in find_story_memory_quality_issues(text, memory, genre=genre):
+                if issue.startswith("term/name drift"):
+                    blocking.append(issue)
+                else:
+                    warnings.append(issue)
+    except Exception as exc:  # noqa: BLE001 — memory QA không được làm chết job
+        log(f"[QUALITY] story memory QA error ({label}): {exc}")
+
     if blocking:
         log(f"[QUALITY_FAIL] {label}: {', '.join(blocking)}")
     if warnings:
         log(f"[QUALITY_WARN] {label}: {', '.join(warnings)}")
-    return issues
+    return blocking, warnings
+
+
+def _gated_pass(
+    run_pass,
+    read_output,
+    *,
+    args: argparse.Namespace,
+    genre: str,
+    char_map: str,
+    label: str,
+    story_id: str = "",
+    slug: str = "",
+) -> str:
+    """Run an LLM pass with a chapter-level quality gate.
+
+    - mode=block (default): re-run toàn bộ pass khi còn blocking issues
+      (tối đa --chapter-quality-retries lần); hết retry → QualityGateError,
+      caller KHÔNG ghi DB.
+    - mode=warn: check + log nhưng vẫn trả text (hành vi cũ).
+    - mode=off: không check.
+
+    Chunk-level retry với repair hints vẫn chạy bên trong run_pass như cũ;
+    gate này bắt các lỗi sống sót qua chunk retry (cross-chunk, glossary drift).
+    """
+    mode = str(getattr(args, "quality_gate", "block") or "block").lower()
+    retries = max(0, int(getattr(args, "chapter_quality_retries", 1)))
+    attempts = (retries + 1) if mode == "block" else 1
+    text = ""
+    blocking: list[str] = []
+    for attempt in range(1, attempts + 1):
+        run_pass()
+        text = read_output()
+        if mode == "off":
+            return text
+        blocking, _ = _quality_check(
+            text,
+            genre,
+            char_map,
+            label,
+            story_id=story_id,
+            slug=slug,
+            story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+        )
+        if not blocking or mode != "block":
+            return text
+        if attempt < attempts:
+            log(f"[QUALITY_GATE] {label}: re-run {attempt}/{retries} — {', '.join(blocking)}")
+    raise QualityGateError(f"quality_gate {label}: {', '.join(blocking)}")
 
 
 def story_metadata_args(args: argparse.Namespace) -> Namespace:
@@ -737,6 +914,11 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     if genre:
         log(f"[GENRE] {genre} (story_id={job.get('story_id')})")
 
+    # Auto-glossary: chạy TRƯỚC translate để glossary kịp inject vào chapter này.
+    maybe_auto_update_term_glossary(
+        job, args, slug=job_slug, current_chapter=current_chapter, genre=genre,
+    )
+
     if output_path.exists() and not args.overwrite:
         log(f"[SKIP] output exists: {output_path}")
         translated_path = None
@@ -769,13 +951,22 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         model = job.get("model") or args.vi_model
         max_chars = int(payload.get("polish_max_chars_per_chunk") or args.polish_max_chars_per_chunk)
         _check_resources(args, label="polish")
-        polish_file(
-            input_path,
-            output_path,
-            _build_args_with_char_map(model, max_chars, genre),
+        polished_text_content = _gated_pass(
+            lambda: polish_file(
+                input_path,
+                output_path,
+                _build_args_with_char_map(model, max_chars, genre),
+            ),
+            lambda: _fix_pronouns_for_genre(
+                read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
+            ),
+            args=args,
+            genre=genre,
+            char_map=effective_char_map or "",
+            label=f"vi ch{current_chapter}",
+            story_id=story_id,
+            slug=job_slug,
         )
-        polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
-        _quality_warn(polished_text_content, genre, effective_char_map or "", f"vi ch{current_chapter}")
         repo.update_chapter_text_outputs(
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
@@ -788,9 +979,18 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         _check_resources(args, label="translate")
         sp_args = _build_args_with_char_map(translate_model, single_pass_max_chars, genre)
         sp_args.num_ctx = args.single_pass_num_ctx
-        single_pass_translate_polish_file(input_path, output_path, sp_args)
-        polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
-        _quality_warn(polished_text_content, genre, effective_char_map or "", f"single-pass ch{current_chapter}")
+        polished_text_content = _gated_pass(
+            lambda: single_pass_translate_polish_file(input_path, output_path, sp_args),
+            lambda: _fix_pronouns_for_genre(
+                read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
+            ),
+            args=args,
+            genre=genre,
+            char_map=effective_char_map or "",
+            label=f"single-pass ch{current_chapter}",
+            story_id=story_id,
+            slug=job_slug,
+        )
         repo.update_chapter_text_outputs(
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
@@ -824,18 +1024,28 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             translated_path = Path(args.translated_output_root) / story_slug_for_job(job, input_path) / output_path.name
             translated_path.parent.mkdir(parents=True, exist_ok=True)
         _check_resources(args, label="translate")
-        translate_file(
-            input_path,
-            translated_path,
-            _build_args_with_char_map(translate_model, translate_max_chars, genre),
+        # Gate translate trước: nếu bản dịch còn blocking issues sau retries thì
+        # fail sớm, không tốn polish pass. DB write của translated DỜI xuống sau
+        # khi polished cũng pass gate — chapter fail không ghi gì vào DB.
+        translated_text_content = _gated_pass(
+            lambda: translate_file(
+                input_path,
+                translated_path,
+                _build_args_with_char_map(translate_model, translate_max_chars, genre),
+            ),
+            lambda: _fix_pronouns_for_genre(
+                read_formatted_output(translated_path, job, write_back=True, label="translated"),
+                genre,
+                translated_path,
+            ),
+            args=args,
+            genre=genre,
+            char_map=effective_char_map or "",
+            label=f"translate ch{current_chapter}",
+            story_id=story_id,
+            slug=job_slug,
         )
-        translated_text_content = read_formatted_output(translated_path, job, write_back=True, label="translated")
         translated_chapter_title = maybe_update_translated_chapter_title(job, translated_text_content)
-        repo.update_chapter_text_outputs(
-            job["chapter_id"],
-            translated_text_path=None if no_save else translated_path.as_posix(),
-            translated_text_content=translated_text_content,
-        )
         effective_char_map = maybe_auto_update_char_map(
             job,
             args,
@@ -850,27 +1060,53 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         genre = resolve_genre(job, effective_char_map)
         mode = post_translate_mode(job, args)
         if mode == "copy":
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(clean_for_audiobook_tts(translated_text_content).strip() + "\n", encoding="utf-8")
-            log(f"[COPY] translated output reused as polished output: {output_path}")
+            def _copy_pass() -> None:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(clean_for_audiobook_tts(translated_text_content).strip() + "\n", encoding="utf-8")
+                log(f"[COPY] translated output reused as polished output: {output_path}")
+
+            # Copy là deterministic — không retry; translated đã pass gate nên chỉ check 1 lần.
+            _copy_args = Namespace(**vars(args))
+            _copy_args.chapter_quality_retries = 0
+            polished_text_content = _gated_pass(
+                _copy_pass,
+                lambda: _fix_pronouns_for_genre(
+                    read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
+                ),
+                args=_copy_args,
+                genre=genre,
+                char_map=effective_char_map or "",
+                label=f"copy ch{current_chapter}",
+                story_id=story_id,
+                slug=job_slug,
+            )
         else:
             # Unload translate model trước khi load polish model để tránh chiếm VRAM cùng lúc.
             if translate_model != args.vi_model:
                 unload_ollama_model(args.ollama_url, translate_model)
             _check_resources(args, label="polish", unloaded_model=translate_model if translate_model != args.vi_model else "")
-            polish_file(
-                translated_path,
-                output_path,
-                _build_args_with_char_map(args.vi_model, polish_max_chars, genre),
+            polished_text_content = _gated_pass(
+                lambda: polish_file(
+                    translated_path,
+                    output_path,
+                    _build_args_with_char_map(args.vi_model, polish_max_chars, genre),
+                ),
+                lambda: _fix_pronouns_for_genre(
+                    read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
+                ),
+                args=args,
+                genre=genre,
+                char_map=effective_char_map or "",
+                label=f"two-pass ch{current_chapter}",
+                story_id=story_id,
+                slug=job_slug,
             )
         # Discard temp translated file only after polish finishes reading it.
         if no_save:
             translated_path.unlink(missing_ok=True)
-        polished_text_content = read_formatted_polished_output(output_path, job, write_back=True)
-        _quality_warn(polished_text_content, genre, effective_char_map or "", f"two-pass ch{current_chapter}")
         repo.update_chapter_text_outputs(
             job["chapter_id"],
-            translated_text_path=translated_path.as_posix(),
+            translated_text_path=None if no_save else translated_path.as_posix(),
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
             translated_text_content=translated_text_content,
             polished_text_content=polished_text_content,
@@ -950,6 +1186,14 @@ def main() -> None:
     parser.add_argument("--keep-alive", default="30m")
     parser.add_argument("--max-quality-retries", type=int, default=2,
                         help="Số lần retry khi chunk polish fail quality check (CJK/EN còn sót, sai đại từ...). Default: 2.")
+    parser.add_argument("--quality-gate", choices=("block", "warn", "off"), default="block",
+                        help="Chapter-level quality gate trước khi ghi DB. block: còn blocking issues sau retries → fail job, KHÔNG ghi DB (default). warn: chỉ log, vẫn ghi (hành vi cũ). off: không check.")
+    parser.add_argument("--chapter-quality-retries", type=int, default=1,
+                        help="Số lần re-run TOÀN BỘ pass (translate/polish) khi chapter fail quality gate. Default: 1.")
+    parser.add_argument("--no-auto-glossary", action="store_true",
+                        help="Tắt auto seed/update terminology glossary (story memory).")
+    parser.add_argument("--glossary-update-interval", type=int, default=20,
+                        help="Incremental glossary update mỗi N chapters. Default: 20.")
     parser.add_argument("--prompt-profile", choices=("fast", "full"), default="full")
     parser.add_argument("--polish-mode", choices=("llm", "clean"), default="llm")
     parser.add_argument(

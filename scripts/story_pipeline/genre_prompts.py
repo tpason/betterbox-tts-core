@@ -27,6 +27,7 @@ GENRE_MAT_THE = "mat_the"
 GENRE_VONG_DU = "vong_du"
 GENRE_LANG_MAN = "lang_man"
 GENRE_WESTERN_FANTASY = "western_fantasy"
+GENRE_KOREAN_CULTIVATION = "korean_cultivation"
 
 # Source codes known to produce Korean-language content.
 _KO_SOURCE_CODES: frozenset[str] = frozenset({"naver", "naver_series", "kakao", "kakaopage"})
@@ -36,6 +37,19 @@ _EN_SOURCE_CODES: frozenset[str] = frozenset({
     "royalroad", "wetriedtls", "skydemonorder", "lightnovelpub",
     "novelbin", "freewebnovel", "novelfire", "novelhub", "fanmtl",
 })
+
+# Explicit korean_cultivation signals — Korean cultivation/murim novels:
+# Hán Việt cultivation terms + modern Korean LN narration. Checked BEFORE
+# western_fantasy so "korean cultivation" is not swallowed by "korean novel".
+_KOREAN_CULTIVATION_STRONG_KW: list[str] = [
+    "korean cultivation",
+    "korean xianxia",
+    "korean murim",
+    "tu tiên hàn",
+    "tu tiên kiểu hàn",
+    "murim",
+    "võ lâm hàn",
+]
 
 # Explicit western_fantasy signals — checked before language heuristics.
 _WESTERN_FANTASY_STRONG_KW: list[str] = [
@@ -92,6 +106,11 @@ def detect_genre(category: str, raw_language: str = "", source_code: str = "") -
     is_korean = lang == "ko" or src in _KO_SOURCE_CODES
     is_english = lang == "en" or src in _EN_SOURCE_CODES
 
+    # Step 0: Explicit korean_cultivation keywords win regardless of language.
+    for kw in _KOREAN_CULTIVATION_STRONG_KW:
+        if kw in normalized:
+            return GENRE_KOREAN_CULTIVATION
+
     # Step 1: Explicit western_fantasy keywords win regardless of language.
     for kw in _WESTERN_FANTASY_STRONG_KW:
         if kw in normalized:
@@ -99,6 +118,10 @@ def detect_genre(category: str, raw_language: str = "", source_code: str = "") -
 
     # Step 2: Language/source-aware override for ambiguous keywords.
     if is_korean or is_english:
+        # Cultivation/xianxia signals from Korean/English source → korean_cultivation
+        # (Hán Việt terms, modern narration) instead of Chinese tien_hiep.
+        if any(kw in normalized for kw in ("cultivation", "xianxia", "tu tiên", "tu chân", "tien hiep")):
+            return GENRE_KOREAN_CULTIVATION
         # "fantasy", "web novel", "academy" for Korean/English → western_fantasy.
         if any(kw in normalized for kw in ("fantasy", "web novel", "academy", "magic")):
             return GENRE_WESTERN_FANTASY
@@ -223,6 +246,17 @@ Thể loại: Fantasy phương Tây / Korean light novel.
 - Giữ tên riêng, địa danh, tổ chức, vật phẩm theo character map; không Hán Việt hóa tên Tây.
 - Cảnh chiến đấu: câu ngắn, động từ rõ; cảnh nội tâm: giọng quan sát, phân tích, không hoa mỹ.\
 """,
+
+    GENRE_KOREAN_CULTIVATION: """\
+Thể loại: Tu tiên Hàn Quốc (Korean cultivation) — thuật ngữ tu luyện Hán Việt + văn kể hiện đại Korean LN. Các quy tắc sau ghi đè quy tắc chung khi mâu thuẫn:
+- THUẬT NGỮ TU LUYỆN BẮT BUỘC dùng âm Hán Việt chuẩn của truyện tu tiên: cảnh giới, công pháp, pháp bảo, tông môn, bí kíp. KHÔNG dịch nghĩa từng chữ ("Tam Hoa Tụ Đỉnh" — KHÔNG phải "ba hoa hội tụ đỉnh cao"; "Ngũ Khí Triều Nguyên" — KHÔNG phải "năm năng lực hợp nhất về nguồn").
+- Tên bí kíp/sách/công pháp: Hán Việt trang trọng, có thể đặt trong 《 》("Siêu Việt Tu Chân Lục" — KHÔNG phải "Kỷ Lục Vượt Qua Tu Chân").
+- "cultivator" = "tu sĩ" (KHÔNG phải "tu luyện giả"); giữ nhất quán: linh khí, linh căn, tu vi, cảnh giới, đan dược, kiếm ý, đạo tâm.
+- VĂN KỂ ngôi 3 vẫn hiện đại kiểu Korean LN: "anh ta", "cô ta", "cậu", tên nhân vật — tránh "hắn/nàng/lão/y" trừ khi character map chỉ định. Ngôi 1: "tôi".
+- Lời thoại thù địch: "mày", "tên kia", "thằng kia" hoặc lược đại từ; tự xưng "ta" (kiêu ngạo) hoặc "tao" (thô lỗ). KHÔNG dùng "ngươi/mi" trừ khi nhân vật cổ phong/tiền bối tu tiên thực sự nói giọng cổ.
+- Tên người Hàn giữ phiên âm Hàn (Seo Eun-Hyun, Kim Young-hoon) — KHÔNG Hán Việt hóa tên người.
+- Cảnh tu luyện/đột phá: câu dài tả khí tức, linh khí, cảm giác; kết câu ngắn mạnh để nhấn cao trào. Cảnh chiến đấu: câu ngắn, động từ mạnh.\
+""",
 }
 
 
@@ -313,6 +347,23 @@ Thể loại: Fantasy phương Tây / Korean light novel.
 - Giọng nhân vật lính/hiệp sĩ: ngắn, chắc, ít cảm thán; không thêm khẩu khí tu tiên.
 - Ưu tiên văn xuôi fantasy trung cổ phương Tây tự nhiên, dễ nghe khi đọc audio.\
 """,
+
+    GENRE_KOREAN_CULTIVATION: """\
+Thể loại: Tu tiên Hàn Quốc (Korean cultivation) — thuật ngữ tu luyện Hán Việt + văn kể hiện đại Korean LN.
+- THUẬT NGỮ TU LUYỆN dùng âm Hán Việt chuẩn, KHÔNG dịch nghĩa từng chữ từ tiếng Anh. Bảng chuyển bắt buộc:
+  Qi Refining (Nth Star/Level) → Luyện Khí tầng N | Foundation Establishment / Qi Building → Trúc Cơ
+  Core Formation / Golden Core → Kết Đan / Kim Đan | Nascent Soul → Nguyên Anh | Soul Transformation → Hóa Thần
+  Three Flowers Gathered at the Peak / Three Flowers Converging → Tam Hoa Tụ Đỉnh
+  Five Energies Returning to Origin / Five Qi Returning to Origin → Ngũ Khí Triều Nguyên
+  cultivator → tu sĩ | cultivation → tu luyện/tu vi | spiritual energy/qi → linh khí | spirit root → linh căn
+  Sword Intent → Kiếm Ý | Dao Heart → Đạo Tâm | tribulation → thiên kiếp/độ kiếp | elixir/pill → đan dược
+  sect → tông môn/môn phái | technique/art → công pháp/võ công | artifact → pháp bảo/pháp khí
+- Tên bí kíp/sách/công pháp/tông môn: dịch Hán Việt trang trọng theo nghĩa ("Transcendent Cultivation Record" → "Siêu Việt Tu Chân Lục"; "Absolute Martial Sect" → "Tuyệt Võ Môn") — KHÔNG dịch word-by-word thành cụm thuần Việt lủng củng.
+- Thuật ngữ đã dùng ở đoạn trước/character map: giữ nguyên y hệt, không đổi cách gọi giữa các đoạn.
+- VĂN KỂ ngôi 3 hiện đại kiểu Korean LN: "anh ta", "cô ta", "cậu", tên nhân vật — tránh "hắn/nàng/lão/y" trừ khi character map chỉ định. Ngôi 1 (truyện kể ngôi nhất): "tôi".
+- Lời thoại thù địch: "mày", "tên kia" hoặc lược đại từ; tự xưng "ta"/"tao". CHỈ dùng "ngươi/mi" cho nhân vật cổ phong/tu sĩ tiền bối thực sự nói giọng cổ.
+- Tên người Hàn giữ phiên âm Hàn (Seo Eun-Hyun, Kim Young-hoon) — KHÔNG Hán Việt hóa tên người, KHÔNG dịch nghĩa tên người.\
+""",
 }
 
 # English-language addenda for translategemma (English-prompt model).
@@ -376,6 +427,17 @@ _TRANSLATE_GENRE_ADDENDUM_EN: dict[str, str] = {
         "do NOT use 'ngươi/mi' (those are xianxia register, wrong for Western setting). "
         "Keep Western names, places, organizations, and titles consistent with the character map."
     ),
+    GENRE_KOREAN_CULTIVATION: (
+        "Genre: Korean cultivation novel — Sino-Vietnamese (Hán Việt) cultivation terminology with modern Korean LN narration. "
+        "Cultivation realms, techniques, sects, artifacts MUST use standard Hán Việt terms, never literal word-by-word Vietnamese: "
+        "Qi Refining → Luyện Khí, Foundation Establishment → Trúc Cơ, Core Formation → Kết Đan, Nascent Soul → Nguyên Anh, "
+        "Three Flowers Gathered at the Peak → Tam Hoa Tụ Đỉnh, Five Energies Returning to Origin → Ngũ Khí Triều Nguyên, "
+        "cultivator → tu sĩ, spiritual energy → linh khí, Sword Intent → Kiếm Ý, sect → tông môn, tribulation → thiên kiếp. "
+        "Book/technique titles translate into formal Hán Việt by meaning (Transcendent Cultivation Record → Siêu Việt Tu Chân Lục). "
+        "NARRATION pronouns stay modern: 'anh ta', 'cô ta', 'cậu', or character names — never 'hắn/nàng/lão/y' unless the character map says so. "
+        "Korean person names keep Korean romanization (Seo Eun-Hyun); never sinicize person names. "
+        "Hostile dialogue uses 'mày/tên kia' and 'ta/tao'; reserve 'ngươi/mi' for genuinely archaic-voiced cultivators."
+    ),
 }
 
 
@@ -390,6 +452,7 @@ _GENRE_HEADER_LINES: dict[str, str] = {
     GENRE_MAT_THE: "## Thể loại: Mạt thế / Tận thế / Apocalypse",
     GENRE_VONG_DU: "## Thể loại: Võng du / VRMMO",
     GENRE_LANG_MAN: "## Thể loại: Lãng mạn / Ngôn tình / Romance",
+    GENRE_KOREAN_CULTIVATION: "## Thể loại: Tu tiên Hàn Quốc (korean cultivation) — thuật ngữ tu luyện Hán Việt, văn kể hiện đại, tên người Hàn",
 }
 
 
@@ -417,6 +480,18 @@ def get_translate_genre_addendum(genre: str, *, for_english_model: bool = False)
 def infer_genre_from_char_map(char_map: str) -> str:
     """Infer a genre override from character-map prose."""
     normalized = (char_map or "").lower()
+    # korean_cultivation BEFORE western_fantasy — its header also mentions Korean/hiện đại.
+    if any(
+        marker in normalized
+        for marker in (
+            "korean cultivation",
+            "tu tiên hàn quốc",
+            "tu tiên hàn",
+            "tu tiên kiểu hàn",
+            "korean murim",
+        )
+    ):
+        return GENRE_KOREAN_CULTIVATION
     if any(
         marker in normalized
         for marker in (
