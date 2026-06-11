@@ -224,11 +224,12 @@ def maybe_auto_update_char_map(
                     repo.update_story_metadata(story_id, {"char_map_raw_covered_to": seed_end})
                 except Exception:
                     pass
+                # Codex finding 1: refresh path — existing_char_map was empty before seed
+                refreshed = find_char_map_file(story_id=story_id, slug=slug)
+                if refreshed:
+                    log(f"[CHAR_MAP] seed ready {refreshed}")
+                    return refreshed
                 return existing_char_map
-            refreshed = find_char_map_file(story_id=story_id, slug=slug)
-            if refreshed:
-                log(f"[CHAR_MAP] seed ready {refreshed}")
-                return refreshed
         except Exception as exc:
             log(f"[CHAR_MAP WARN] seed extract failed: {type(exc).__name__}: {exc}")
             _record_char_map_create_failure(story_id, current_chapter)
@@ -328,6 +329,11 @@ def _run_incremental_char_map(
         log(f"[CHAR_MAP_INC WARN] ch{chapter_num:04d}: {exc}")
 
 
+def _lookahead_coverage_key(text_source: str) -> str:
+    """Return the metadata key tracking lookahead coverage for a given text_source."""
+    return "char_map_raw_covered_to" if text_source == "raw" else f"char_map_{text_source}_covered_to"
+
+
 def _run_lookahead_char_map(
     job: dict,
     args: argparse.Namespace,
@@ -336,11 +342,12 @@ def _run_lookahead_char_map(
     char_map_path: str,
     slug: str,
     genre: str,
+    text_source: str = "raw",
 ) -> None:
-    """Pre-extract characters from raw text N chapters ahead of current_chapter.
+    """Pre-extract characters N chapters ahead of current_chapter.
 
-    Keeps char_map_raw_covered_to = current_chapter + lookahead_window so that
-    when translating ch11, the char-map already has raw character data up to ch21.
+    Uses source-aware coverage metadata so raw and translated lookahead
+    track independently (char_map_raw_covered_to vs char_map_translated_covered_to).
 
     Each call extends coverage by exactly 1 chapter (incremental sliding window),
     so the overhead per chapter is a single LLM call (~30-60s). No block pipeline.
@@ -357,28 +364,32 @@ def _run_lookahead_char_map(
         return
 
     target = current_chapter + lookahead
+    coverage_key = _lookahead_coverage_key(text_source)
 
     try:
         story = repo.get_story_by_id(story_id)
         metadata = story.get("metadata") or {}
-        raw_covered = int(metadata.get("char_map_raw_covered_to") or 0)
+        covered = int(metadata.get(coverage_key) or 0)
     except Exception:
-        raw_covered = 0
+        covered = 0
 
-    if raw_covered >= target:
+    if covered >= target:
         return  # already ahead enough
 
-    from_ch = raw_covered + 1
+    from_ch = covered + 1
     model = str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b"))
     char_map_timeout = max(30, int(getattr(args, "char_map_timeout", 90) or 90))
     n_new = target - from_ch + 1
 
-    log(f"[CHAR_MAP LOOKAHEAD] ch{from_ch:04d}→ch{target:04d} (raw, {n_new} chaps) story_id={story_id}")
+    log(
+        f"[CHAR_MAP LOOKAHEAD] ch{from_ch:04d}→ch{target:04d} "
+        f"(text_source={text_source}, {n_new} chaps) story_id={story_id}"
+    )
     cmd = [
         sys.executable,
         str(SCRIPT_DIR / "extract_char_map.py"),
         "--story-id", story_id,
-        "--text-source", "raw",
+        "--text-source", text_source,
         "--from-chapter", str(from_ch),
         "--to-chapter", str(target),
         "--sample-chapters", str(n_new),
@@ -398,8 +409,8 @@ def _run_lookahead_char_map(
             tail = (result.stderr or result.stdout or "").strip()[-500:]
             log(f"[CHAR_MAP LOOKAHEAD WARN] failed rc={result.returncode}: {tail}")
             return
-        repo.update_story_metadata(story_id, {"char_map_raw_covered_to": target})
-        log(f"[CHAR_MAP LOOKAHEAD] done — raw coverage now ch{target:04d}")
+        repo.update_story_metadata(story_id, {coverage_key: target})
+        log(f"[CHAR_MAP LOOKAHEAD] done — {coverage_key}={target}")
     except Exception as exc:
         log(f"[CHAR_MAP LOOKAHEAD WARN] {type(exc).__name__}: {exc}")
 
@@ -1008,16 +1019,15 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     current_chapter = int(payload.get("chapter_number") or 0)
     # Pre-resolve genre from DB only (no char_map yet) so auto-create can inject genre header
     pre_genre = resolve_genre(job, char_map_file="")
-    if raw_language == "vi" or effective_char_map:
-        effective_char_map = maybe_auto_update_char_map(
-            job,
-            args,
-            slug=job_slug,
-            current_chapter=current_chapter,
-            existing_char_map=effective_char_map,
-            text_source=char_map_text_source,
-            genre=pre_genre,
-        )
+    effective_char_map = maybe_auto_update_char_map(
+        job,
+        args,
+        slug=job_slug,
+        current_chapter=current_chapter,
+        existing_char_map=effective_char_map,
+        text_source=char_map_text_source,
+        genre=pre_genre,
+    )
     if effective_char_map:
         log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
         try:
@@ -1029,7 +1039,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         except Exception as exc:  # noqa: BLE001 — validation chỉ là cảnh báo
             log(f"[CHARMAP_WARN] validate error: {exc}")
 
-    # Lookahead: pre-extract raw characters N chapters ahead so the char-map is
+    # Lookahead: pre-extract characters N chapters ahead so the char-map is
     # already populated when those chapters are translated (sliding window, 1 new
     # chapter per call → minimal overhead). Runs only if char_map already exists.
     if effective_char_map and current_chapter > 0:
@@ -1040,6 +1050,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             char_map_path=effective_char_map,
             slug=job_slug,
             genre=pre_genre,
+            text_source=char_map_text_source,
         )
 
     genre = resolve_genre(job, effective_char_map)

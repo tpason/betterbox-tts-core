@@ -63,6 +63,9 @@ Với mỗi nhân vật trả về JSON object:
   "addressing_others": "cách nhân vật gọi người khác theo nhóm: đồng đội/cấp trên/người lớn hơn/trẻ nhỏ/kẻ thù/người lạ",
   "relative_status": "tuổi/vị thế/quyền lực tương đối nếu suy ra được",
   "relationships": ["các quan hệ cụ thể nếu thấy, ví dụ: Enkrid -> Luagarne: đồng đội, xưng tôi/cô; tên cướp -> Enkrid: thù địch, không gọi anh/bạn/cậu; nếu là Western/Korean thì dùng mày/tên kia/lược đại từ"],
+  "addressing_by_target": ["cặp xưng hô CỤ THỂ theo đối tượng nếu có bằng chứng, ví dụ: Enkrid -> Luagarne: tôi/cô; tên cướp -> Enkrid: không dùng anh/bạn"],
+  "forbidden_pronouns": ["xưng hô KHÔNG nên dùng cho nhân vật này nếu có bằng chứng, ví dụ: không dùng hắn/nàng với Korean char"],
+  "title_terms": ["danh hiệu/chức vụ quan trọng và cách dịch nên giữ, ví dụ: Hiệp sĩ trưởng / Knight Commander"],
   "personality": "2-4 từ mô tả tính cách",
   "speech_style": "1-2 câu mô tả cách nói đặc trưng — đặc biệt chú ý: câu ngắn/dài, cảm xúc ẩn/rõ, mức độ kiệm lời",
   "role": "nhân vật chính/đồng đội/phản diện/phụ"
@@ -74,6 +77,7 @@ Chú ý đặc biệt với tiếng Việt:
 - Với Western fantasy, Korean light novel, truyện văn phòng/học viện/hiện đại, KHÔNG đề xuất "ngươi/mi"; dùng "mày", "tên kia", "thằng kia", gọi thẳng vai trò hoặc lược đại từ.
 - Nếu nhân vật nhỏ tuổi hơn nói với người lớn/cấp trên, ghi rõ tự xưng "em/con/cháu" và gọi đối phương "anh/chú/bác/ngài"; không dùng "mày/tao" trừ khi thật sự thù địch.
 - Một nhân vật có thể xưng hô khác nhau với từng người nghe. Hãy ghi các cặp quan hệ quan trọng khi có bằng chứng.
+- addressing_by_target, forbidden_pronouns, title_terms: trả về [] nếu không có bằng chứng rõ ràng.
 
 Trả về JSON array. Ví dụ:
 [
@@ -86,6 +90,9 @@ Trả về JSON array. Ví dụ:
     "addressing_others": "với đồng đội: tôi/cô/cậu; với kẻ thù Western/Korean: mày/tên kia/lược đại từ; với kẻ thù Trung/cổ phong: ngươi/mi; với trẻ nhỏ: cậu/em",
     "relative_status": "hiệp sĩ trưởng thành, thường có vị thế cao hơn lính thường và dân thường",
     "relationships": ["Enkrid -> Luagarne: đồng đội, tôi/cô", "kẻ cướp -> Enkrid: thù địch, không dùng anh/bạn"],
+    "addressing_by_target": ["Enkrid -> Luagarne: tôi/cô"],
+    "forbidden_pronouns": [],
+    "title_terms": ["Đội trưởng / Squad Leader"],
     "personality": "lạnh lùng, phân tích, kiệm lời",
     "speech_style": "câu ngắn, quyết đoán, hiếm khi giải thích; không cảm thán",
     "role": "nhân vật chính"
@@ -316,23 +323,25 @@ def merge_characters(
             ):
                 if not existing_char.get(field) and char.get(field):
                     result[matched_key][field] = char[field]
-            if char.get("relationships"):
-                old_relationships = existing_char.get("relationships") or []
-                if isinstance(old_relationships, str):
-                    old_relationships = [old_relationships]
-                new_relationships = char.get("relationships") or []
-                if isinstance(new_relationships, str):
-                    new_relationships = [new_relationships]
-                merged_relationships = []
-                seen_relationships = set()
-                for relationship in [*old_relationships, *new_relationships]:
-                    relationship = str(relationship).strip()
-                    key_rel = relationship.lower()
-                    if relationship and key_rel not in seen_relationships:
-                        seen_relationships.add(key_rel)
-                        merged_relationships.append(relationship)
-                if merged_relationships:
-                    result[matched_key]["relationships"] = merged_relationships
+            for list_field in ("relationships", "addressing_by_target", "forbidden_pronouns", "title_terms"):
+                new_items = char.get(list_field) or []
+                if not new_items:
+                    continue
+                old_items = existing_char.get(list_field) or []
+                if isinstance(old_items, str):
+                    old_items = [old_items]
+                if isinstance(new_items, str):
+                    new_items = [new_items]
+                merged_items: list[str] = []
+                seen_items: set[str] = set()
+                for item in [*old_items, *new_items]:
+                    item = str(item).strip()
+                    key_item = item.lower()
+                    if item and key_item not in seen_items:
+                        seen_items.add(key_item)
+                        merged_items.append(item)
+                if merged_items:
+                    result[matched_key][list_field] = merged_items
             # Track first/last seen chapter
             if chapter_num > 0:
                 ex_first = existing_char.get("first_seen_chapter")
@@ -388,6 +397,12 @@ def parse_existing_char_map(content: str) -> dict[str, dict[str, Any]]:
             current["relative_status"] = value
         elif lower.startswith("quan hệ:"):
             current.setdefault("relationships", []).append(value)
+        elif lower.startswith("xưng hô theo đối tượng:"):
+            current.setdefault("addressing_by_target", []).append(value)
+        elif lower.startswith("xưng hô cấm:"):
+            current.setdefault("forbidden_pronouns", []).append(value)
+        elif lower.startswith("danh hiệu/chức vụ:"):
+            current.setdefault("title_terms", []).append(value)
         elif lower.startswith("tính cách:"):
             current["personality"] = value
         elif lower.startswith("giọng nói:") or lower.startswith("giọng thoại:"):
@@ -462,6 +477,18 @@ def append_new_char_sections(
             relationship = str(relationship).strip()
             if relationship:
                 lines.append(f"- Quan hệ: {relationship}")
+        for rule in (char.get("addressing_by_target") or [])[:8]:
+            rule = str(rule).strip()
+            if rule:
+                lines.append(f"- Xưng hô theo đối tượng: {rule}")
+        for rule in (char.get("forbidden_pronouns") or [])[:4]:
+            rule = str(rule).strip()
+            if rule:
+                lines.append(f"- Xưng hô cấm: {rule}")
+        for term in (char.get("title_terms") or [])[:4]:
+            term = str(term).strip()
+            if term:
+                lines.append(f"- Danh hiệu/chức vụ: {term}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -500,6 +527,18 @@ def format_char_map(
                     notes.append(f"{field}: {val}")
             arc_lines.append(f"### {name}")
             arc_lines.extend(f"- {n}" for n in notes)
+            for rule in (char.get("addressing_by_target") or [])[:8]:
+                rule = str(rule).strip()
+                if rule:
+                    arc_lines.append(f"- Xưng hô theo đối tượng: {rule}")
+            for rule in (char.get("forbidden_pronouns") or [])[:4]:
+                rule = str(rule).strip()
+                if rule:
+                    arc_lines.append(f"- Xưng hô cấm: {rule}")
+            for term in (char.get("title_terms") or [])[:4]:
+                term = str(term).strip()
+                if term:
+                    arc_lines.append(f"- Danh hiệu/chức vụ: {term}")
             arc_lines.append("")
         return existing_content.rstrip() + "\n" + "\n".join(arc_lines)
 
@@ -567,6 +606,21 @@ def format_char_map(
             relationship = str(relationship).strip()
             if relationship:
                 lines.append(f"- Quan hệ: {relationship}")
+
+        for rule in (char.get("addressing_by_target") or [])[:8]:
+            rule = str(rule).strip()
+            if rule:
+                lines.append(f"- Xưng hô theo đối tượng: {rule}")
+
+        for rule in (char.get("forbidden_pronouns") or [])[:4]:
+            rule = str(rule).strip()
+            if rule:
+                lines.append(f"- Xưng hô cấm: {rule}")
+
+        for term in (char.get("title_terms") or [])[:4]:
+            term = str(term).strip()
+            if term:
+                lines.append(f"- Danh hiệu/chức vụ: {term}")
 
         personality = char.get("personality", "")
         if personality:
@@ -657,6 +711,9 @@ Với mỗi nhân vật mới, trả về JSON object:
   "self_address": "tôi / ta / ...",
   "addressing_others": "gọi đồng đội/cấp trên/kẻ thù thế nào",
   "relative_status": "tuổi/vị thế nếu suy được",
+  "addressing_by_target": [],
+  "forbidden_pronouns": [],
+  "title_terms": [],
   "personality": "2-4 từ",
   "speech_style": "câu ngắn/dài, kiệm lời/nhiều lời, v.v.",
   "role": "nhân vật chính / đồng đội / phản diện / phụ"
