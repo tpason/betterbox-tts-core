@@ -101,7 +101,7 @@ _WRONG_PRONOUN_RE = re.compile(r"\b(hắn|Hắn|nàng|Nàng|lão|y)\b")
 # e.g. trưởng lão (elder), ông lão (old man), y tá (nurse), y học (medicine)
 _COMPOUND_NOUN_RE = re.compile(
     r"\b(trưởng|ông|bà|cụ|già)\s+lão\b"
-    r"|\blão\s+(thành|làng|luyện|thực|thọ|giả|nhân|quái|tổ|tiền|tinh|hóa|hóa)\b"
+    r"|\blão\s+(thành|làng|luyện|thực|thọ|giả|nhân|quái|tổ|tiền|tinh|hóa|già|phu|sư|gia|đại)\b"
     r"|\by\s+(tá|học|phục|lệnh|khoa|sĩ|viện|thuật)\b"
     r"|\b(nội|đông|đồng|trung)\s+y\b",
     re.IGNORECASE | re.UNICODE,
@@ -176,9 +176,10 @@ def check_polished_quality(
     if not is_probably_vietnamese(text):
         issues.append("not_vietnamese")
 
-    # Check 2: CJK contamination (untranslated source still present)
+    # Check 2: CJK contamination (untranslated source still present).
+    # Threshold 8 to avoid false positives from embedded Korean/Chinese terms in Korean LN.
     cjk_count = len(_CJK_RE.findall(text))
-    if cjk_count >= 5:
+    if cjk_count >= 8:
         issues.append(f"cjk_not_translated:{cjk_count}")
 
     # Check 3: model looping (duplicate paragraphs)
