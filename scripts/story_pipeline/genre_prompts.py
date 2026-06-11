@@ -51,6 +51,12 @@ _KOREAN_CULTIVATION_STRONG_KW: list[str] = [
     "võ lâm hàn",
 ]
 
+# Generic cultivation signals — khi xuất hiện cùng tag Korean/LN rộng
+# ("korean web novel, xianxia"), cultivation phải thắng western_fantasy.
+_CULTIVATION_MARKERS: tuple[str, ...] = (
+    "cultivation", "xianxia", "tu tiên", "tu chân", "tien hiep", "tu tien",
+)
+
 # Explicit western_fantasy signals — checked before language heuristics.
 _WESTERN_FANTASY_STRONG_KW: list[str] = [
     "western fantasy",
@@ -111,16 +117,20 @@ def detect_genre(category: str, raw_language: str = "", source_code: str = "") -
         if kw in normalized:
             return GENRE_KOREAN_CULTIVATION
 
-    # Step 1: Explicit western_fantasy keywords win regardless of language.
-    for kw in _WESTERN_FANTASY_STRONG_KW:
-        if kw in normalized:
-            return GENRE_WESTERN_FANTASY
+    has_cultivation = any(kw in normalized for kw in _CULTIVATION_MARKERS)
+
+    # Step 1: Explicit western_fantasy keywords — nhưng cultivation marker thắng:
+    # "korean web novel, xianxia" phải ra korean_cultivation, không phải western.
+    if not has_cultivation:
+        for kw in _WESTERN_FANTASY_STRONG_KW:
+            if kw in normalized:
+                return GENRE_WESTERN_FANTASY
 
     # Step 2: Language/source-aware override for ambiguous keywords.
     if is_korean or is_english:
         # Cultivation/xianxia signals from Korean/English source → korean_cultivation
         # (Hán Việt terms, modern narration) instead of Chinese tien_hiep.
-        if any(kw in normalized for kw in ("cultivation", "xianxia", "tu tiên", "tu chân", "tien hiep")):
+        if has_cultivation:
             return GENRE_KOREAN_CULTIVATION
         # "fantasy", "web novel", "academy" for Korean/English → western_fantasy.
         if any(kw in normalized for kw in ("fantasy", "web novel", "academy", "magic")):
