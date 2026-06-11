@@ -1,0 +1,109 @@
+[
+  {
+    "source_terms": ["Transmigration", "Isekai", "Transported", "Transmigrate", "穿越", "이세계", "穿越異世界", "전이"],
+    "canonical_vi": "Xuyên Không",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Transmigration", "Du Hành Thời Gian", "Isekai", "Xuyên Không Gian"],
+    "meaning": "linh hồn đến thế giới khác hoặc vào thân thể nhân vật — KHÁC hồi quy (về quá khứ cùng thế giới)"
+  },
+  {
+    "source_terms": ["Transmigrate into a book", "Transmigrate into a novel", "穿書", "穿越小說", "소설 속으로"],
+    "canonical_vi": "Xuyên Sách",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Xuyên Cuốn Sách", "Vào Trong Tiểu Thuyết", "Transmigrate into a book"],
+    "meaning": "xuyên vào thế giới của tiểu thuyết/manhwa mình đã đọc — biết trước cốt truyện"
+  },
+  {
+    "source_terms": ["Original owner", "Original soul", "Host", "原主", "원래 주인", "原本靈魂"],
+    "canonical_vi": "Nguyên Chủ",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Original Owner", "Chủ Gốc", "Chủ Nhân Cũ"],
+    "meaning": "linh hồn gốc của thân thể mà nhân vật xuyên vào — thường đã chết hoặc đã đi"
+  },
+  {
+    "source_terms": ["Protagonist", "Main character", "Male lead", "Female lead", "주인공", "男主", "女主", "男主角"],
+    "canonical_vi": "Nhân Vật Chính",
+    "kind": "other",
+    "wrong_translations": ["Protagonist", "Main Character"],
+    "variants": ["Nam Chính (male lead)", "Nữ Chính (female lead)", "Nữ Phụ (supporting female)"]
+  },
+  {
+    "source_terms": ["Cannon fodder", "Side character", "Waste character", "炮灰", "쓰레기 캐릭터", "龍套"],
+    "canonical_vi": "Nhân Vật Phụ",
+    "kind": "other",
+    "wrong_translations": ["Cannon Fodder", "Nhân Vật Rác"],
+    "variants": ["Tống Kịch (cannon fodder that exists only to lose)", "Nhân Vật Nền"]
+  },
+  {
+    "source_terms": ["Plot armor", "Protagonist halo", "主角光環", "주인공 버프", "主角力場"],
+    "canonical_vi": "Hào Quang Chủ Nhân Công",
+    "kind": "other",
+    "wrong_translations": ["Plot Armor", "Giáp Cốt Truyện"],
+    "variants": ["Hào Quang Chủ Giác", "Buff Chủ Nhân Công"]
+  },
+  {
+    "source_terms": ["White lotus", "White moonlight", "白蓮花", "흰 연꽃", "白月光"],
+    "canonical_vi": "Bạch Liên",
+    "kind": "other",
+    "wrong_translations": ["White Lotus", "Hoa Sen Trắng"],
+    "meaning": "nhân vật nữ vẻ ngoài ngây thơ trong sáng nhưng thực ra tính toán — archetype tiêu cực"
+  },
+  {
+    "source_terms": ["Green tea bitch", "Green tea", "녹차", "녹차년", "绿茶婊", "绿茶"],
+    "canonical_vi": "Trà Xanh",
+    "kind": "other",
+    "wrong_translations": ["Green Tea", "Trà Lá"],
+    "meaning": "nhân vật nữ giả vờ dịu dàng vô hại nhưng cố tình gây hại ngầm — slang internet",
+    "policy": "Trà Xanh — giữ nguyên từ này vì đã phổ biến trong cộng đồng đọc truyện Việt"
+  },
+  {
+    "source_terms": ["Villain", "Villain character", "反派", "악역", "反面角色"],
+    "canonical_vi": "Phản Diện",
+    "kind": "other",
+    "wrong_translations": ["Villain", "Kẻ Phản Bội"],
+    "variants": ["Kẻ Thù Chính (main antagonist)", "Nhân Vật Phản Diện"]
+  },
+  {
+    "source_terms": ["World consciousness", "World will", "世界意識", "세계 의지", "世界之意"],
+    "canonical_vi": "Ý Chí Thế Giới",
+    "kind": "other",
+    "wrong_translations": ["World Consciousness", "Nhận Thức Thế Giới"]
+  },
+  {
+    "source_terms": ["Plot", "Original plot", "Story plot", "劇情", "스토리", "원래 줄거리", "原劇情"],
+    "canonical_vi": "Cốt Truyện",
+    "kind": "other",
+    "wrong_translations": ["Plot", "Tình Tiết Câu Chuyện"],
+    "variants": ["Tình Tiết Gốc (original plot)", "Kịch Bản Gốc"]
+  },
+  {
+    "source_terms": ["Transmigrator", "Person who transmigrated", "穿越者", "이세계인", "傳送者"],
+    "canonical_vi": "Người Xuyên Không",
+    "kind": "other",
+    "wrong_translations": ["Transmigrator", "Người Du Hành Xuyên Không"]
+  },
+  {
+    "source_terms": ["System", "Cheat", "Golden finger", "외부 도움", "金手指", "系統"],
+    "canonical_vi": "Hệ Thống",
+    "kind": "other",
+    "wrong_translations": ["System", "Hệ Thống Gian Lận"],
+    "policy": "Hệ Thống cho trợ lý AI/game system trong xuyên không; Kim Chỉ (金手指) = cheat/special advantage"
+  },
+  {
+    "source_terms": ["Blacken", "Fall", "Character blackening", "黑化", "흑화", "墮落"],
+    "canonical_vi": "Hắc Hóa",
+    "kind": "other",
+    "wrong_translations": ["Blacken", "Trở Nên Tối"],
+    "meaning": "nhân vật tốt bị biến đổi thành xấu do chấn thương/phản bội — archetype phổ biến"
+  },
+  {
+    "source_terms": ["Slag man", "Scumbag", "渣男", "쓰레기남", "渣滓"],
+    "canonical_vi": "Tên Phế Vật",
+    "kind": "other",
+    "wrong_translations": ["Slag Man", "Cặn Bã"],
+    "variants": ["Đàn Ông Rác Rưởi", "Kẻ Tệ Bạc"]
+  }
+]

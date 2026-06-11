@@ -1,0 +1,191 @@
+[
+  {
+    "source_terms": ["Level", "Lv", "LVL"],
+    "canonical_vi": "Cấp Độ",
+    "kind": "realm",
+    "realm_level_format": "Cấp Độ 1 / Cấp Độ 50 ... hoặc Level X (theo ngữ cảnh)",
+    "wrong_translations": ["Nhất Tầng", "Tầng 1"],
+    "policy": "KHÔNG dùng Hán Việt cho fantasy Tây — dùng số Ả Rập hoặc English level names"
+  },
+  {
+    "source_terms": ["Tier", "Rank", "Grade"],
+    "canonical_vi": "Hạng",
+    "kind": "realm",
+    "realm_level_format": "Hạng 1 / Hạng 2 hoặc Hạng Đồng/Bạc/Vàng (theo truyện)",
+    "wrong_translations": ["Tầng", "Cảnh Giới", "Tier"]
+  },
+  {
+    "source_terms": ["Magic", "Mana", "Spell"],
+    "canonical_vi": "Ma Thuật",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Phép Thuật", "Linh Thuật", "Magic"],
+    "policy": "Ma Thuật cho Western fantasy; Pháp Thuật cũng chấp nhận; KHÔNG dùng Linh Thuật (tien_hiep)"
+  },
+  {
+    "source_terms": ["Mana", "Magic Power", "Magical Energy"],
+    "canonical_vi": "Mana",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN 'Mana' trong western fantasy — đây là loanword phổ biến",
+    "forbidden": ["Linh Khí", "Chân Khí", "Nội Công"]
+  },
+  {
+    "source_terms": ["Spell", "Incantation", "Cast"],
+    "canonical_vi": "Phép",
+    "kind": "technique",
+    "wrong_translations": ["Spell", "Thi Chú"],
+    "variants": ["Tung Phép (to cast)", "Phép Thuật (magic spell)"]
+  },
+  {
+    "source_terms": ["Warrior", "Fighter", "Knight"],
+    "canonical_vi": "Chiến Binh",
+    "kind": "other",
+    "wrong_translations": ["Warrior", "Fighter"],
+    "variants": ["Hiệp Sĩ (knight)", "Dũng Sĩ (brave warrior)"]
+  },
+  {
+    "source_terms": ["Mage", "Wizard", "Sorcerer", "Magician", "Sorceress"],
+    "canonical_vi": "Pháp Sư",
+    "kind": "other",
+    "wrong_translations": ["Mage", "Wizard", "Phù Thủy"],
+    "variants": ["Ảo Thuật Sư (magician/illusionist)", "Phù Thủy (witch/warlock negative connotation)"]
+  },
+  {
+    "source_terms": ["Rogue", "Thief", "Assassin"],
+    "canonical_vi": "Thích Khách",
+    "kind": "other",
+    "wrong_translations": ["Rogue", "Tên Trộm"],
+    "variants": ["Sát Thủ (assassin)", "Tên Trộm (thief)"]
+  },
+  {
+    "source_terms": ["Healer", "Priest", "Cleric", "Paladin"],
+    "canonical_vi": "Thầy Thuốc",
+    "kind": "other",
+    "wrong_translations": ["Healer", "Giáo Sĩ"],
+    "variants": ["Thánh Hiệp Sĩ (paladin)", "Linh Mục (priest)"]
+  },
+  {
+    "source_terms": ["Archer", "Ranger", "Hunter"],
+    "canonical_vi": "Cung Thủ",
+    "kind": "other",
+    "wrong_translations": ["Archer", "Ranger"],
+    "variants": ["Thợ Săn (hunter)", "Lâm Tuần (ranger)"]
+  },
+  {
+    "source_terms": ["Dragon", "Wyvern", "Drake"],
+    "canonical_vi": "Rồng",
+    "kind": "other",
+    "wrong_translations": ["Dragon"],
+    "variants": ["Wyvern (giữ nguyên nếu khác loài)", "Long (Hán Việt — chỉ dùng khi truyện có xianxia elements)"]
+  },
+  {
+    "source_terms": ["Elf", "High Elf", "Dark Elf", "Wood Elf"],
+    "canonical_vi": "Tiên Tộc",
+    "kind": "other",
+    "wrong_translations": ["Elf"],
+    "variants": ["Yêu Tinh (fairy/lesser fae)", "Thâm Tiên (dark elf)"]
+  },
+  {
+    "source_terms": ["Dwarf", "Halfling", "Gnome"],
+    "canonical_vi": "Người Lùn",
+    "kind": "other",
+    "wrong_translations": ["Dwarf"]
+  },
+  {
+    "source_terms": ["Orc", "Goblin", "Troll"],
+    "canonical_vi": "Quái Vật",
+    "kind": "other",
+    "wrong_translations": ["Orc", "Goblin"],
+    "policy": "Giữ tên loài nếu không có từ Việt hóa phổ biến; dùng 'Quái Vật X' nếu cần",
+    "variants": ["Yêu Quái Goblin", "Quái Orc"]
+  },
+  {
+    "source_terms": ["Guild", "Party", "Raid Group"],
+    "canonical_vi": "Hội",
+    "kind": "organization",
+    "wrong_translations": ["Guild", "Party"],
+    "variants": ["Nhóm Phiêu Lưu (adventuring party)", "Bang Hội (guild)"]
+  },
+  {
+    "source_terms": ["Guild Master", "Guild Leader", "Guild Head"],
+    "canonical_vi": "Bang Chủ",
+    "kind": "title",
+    "wrong_translations": ["Guild Master", "Lãnh Đạo Hội"]
+  },
+  {
+    "source_terms": ["Kingdom", "Empire", "Realm"],
+    "canonical_vi": "Vương Quốc",
+    "kind": "place",
+    "wrong_translations": ["Kingdom", "Empire"],
+    "variants": ["Đế Quốc (empire)", "Liên Minh (confederation/alliance)"]
+  },
+  {
+    "source_terms": ["King", "Queen", "Emperor", "Empress"],
+    "canonical_vi": "Quốc Vương",
+    "kind": "title",
+    "wrong_translations": ["King", "Queen"],
+    "variants": ["Hoàng Đế (emperor)", "Nữ Vương (queen)", "Hoàng Hậu (empress)"]
+  },
+  {
+    "source_terms": ["Prince", "Princess", "Crown Prince"],
+    "canonical_vi": "Hoàng Tử",
+    "kind": "title",
+    "wrong_translations": ["Prince", "Princess"],
+    "variants": ["Công Chúa (princess)", "Thái Tử (crown prince)"]
+  },
+  {
+    "source_terms": ["Noble", "Lord", "Duke", "Count", "Baron"],
+    "canonical_vi": "Quý Tộc",
+    "kind": "title",
+    "wrong_translations": ["Noble", "Lord"],
+    "variants": ["Công Tước (duke)", "Bá Tước (count)", "Nam Tước (baron)"]
+  },
+  {
+    "source_terms": ["Hero", "Chosen One", "Hero of Prophecy"],
+    "canonical_vi": "Anh Hùng",
+    "kind": "other",
+    "wrong_translations": ["Hero", "Chosen"],
+    "variants": ["Người Được Chọn (chosen one)", "Dũng Sĩ (classic hero)"]
+  },
+  {
+    "source_terms": ["Monster", "Creature", "Beast", "Demon"],
+    "canonical_vi": "Quái Vật",
+    "kind": "other",
+    "wrong_translations": ["Monster"],
+    "variants": ["Ác Quỷ (demon/evil spirit)", "Thú Dữ (dangerous beast)"]
+  },
+  {
+    "source_terms": ["Dungeon", "Tower", "Labyrinth"],
+    "canonical_vi": "Địa Đạo",
+    "kind": "place",
+    "wrong_translations": ["Dungeon"],
+    "variants": ["Tháp Thử Thách (tower)", "Mê Cung (labyrinth)"]
+  },
+  {
+    "source_terms": ["Holy", "Sacred", "Divine", "Blessed"],
+    "canonical_vi": "Thần Thánh",
+    "kind": "other",
+    "wrong_translations": ["Holy", "Sacred"],
+    "policy": "Thần Thánh cho tổng quát; Linh Thiêng cho đồ vật; Thánh Linh cho holy spirit"
+  },
+  {
+    "source_terms": ["Dark", "Evil", "Cursed", "Demonic"],
+    "canonical_vi": "Tà Ác",
+    "kind": "other",
+    "wrong_translations": ["Dark", "Evil"],
+    "variants": ["Ác Quỷ (demonic)", "Bị Nguyền Rủa (cursed)", "Hắc Ám (dark)"]
+  },
+  {
+    "source_terms": ["Adventure", "Quest", "Journey"],
+    "canonical_vi": "Cuộc Phiêu Lưu",
+    "kind": "other",
+    "wrong_translations": ["Adventure", "Quest"],
+    "variants": ["Nhiệm Vụ (quest/mission)", "Hành Trình (journey)"]
+  },
+  {
+    "source_terms": ["Adventurer", "Adventuring Party"],
+    "canonical_vi": "Phiêu Lưu Gia",
+    "kind": "other",
+    "wrong_translations": ["Adventurer"]
+  }
+]

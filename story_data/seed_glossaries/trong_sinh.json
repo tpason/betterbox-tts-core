@@ -1,0 +1,114 @@
+[
+  {
+    "source_terms": ["Regression", "Return", "Time Regression", "회귀", "回歸", "重生回到過去", "逆转时间"],
+    "canonical_vi": "Hồi Quy",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Tái Sinh", "Luân Hồi", "Quay Lại", "Regression"],
+    "meaning": "quay về thời điểm trước với ký ức nguyên vẹn — KHÁC với tái sinh (đầu thai vào thân mới)"
+  },
+  {
+    "source_terms": ["Regressor", "Time Traveler (backward)", "회귀자", "回歸者", "重生者 (giữ ký ức)"],
+    "canonical_vi": "Người Hồi Quy",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Người Tái Sinh", "Người Thời Gian", "Regressor"],
+    "meaning": "nhân vật đã hồi quy về quá khứ — giữ ký ức từ 'tương lai' đã sống qua"
+  },
+  {
+    "source_terms": ["Rebirth", "Reincarnation", "Second Life", "재생", "重生", "转世", "환생"],
+    "canonical_vi": "Trọng Sinh",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Hồi Quy", "Luân Hồi", "Reincarnation"],
+    "meaning": "sinh lại vào một thân thể mới (khác hồi quy — hồi quy là cùng một thân thể/thế giới)",
+    "policy": "Trọng Sinh = trong_sinh genre; Hồi Quy = hoi_quy/regression genre"
+  },
+  {
+    "source_terms": ["Reincarnator", "Reborn person", "중생자", "重生者"],
+    "canonical_vi": "Người Trọng Sinh",
+    "kind": "other",
+    "wrong_translations": ["Người Luân Hồi", "Reincarnator"]
+  },
+  {
+    "source_terms": ["Past life", "Previous life", "Former life", "전생", "前生", "前世", "過去世"],
+    "canonical_vi": "Kiếp Trước",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Cuộc Đời Trước", "Đời Trước", "Past Life"],
+    "variants": ["Tiền Kiếp", "Đời Cũ"]
+  },
+  {
+    "source_terms": ["Memory", "Memories", "Past life memories", "기억", "記憶", "前世記憶"],
+    "canonical_vi": "Ký Ức",
+    "kind": "other",
+    "wrong_translations": ["Memory", "Kỷ Niệm"],
+    "variants": ["Ký Ức Kiếp Trước (past life memories)", "Ký Ức Cũ"]
+  },
+  {
+    "source_terms": ["Foreknowledge", "Future knowledge", "Prior knowledge", "미래 지식", "預知", "先知"],
+    "canonical_vi": "Kiến Thức Tương Lai",
+    "kind": "other",
+    "wrong_translations": ["Foreknowledge", "Kiến Thức Tiên Tri"],
+    "variants": ["Biết Trước", "Tiên Tri (prophetic context only)"]
+  },
+  {
+    "source_terms": ["Second Chance", "New Beginning", "새로운 시작", "第二次機會", "重來一次"],
+    "canonical_vi": "Cơ Hội Thứ Hai",
+    "kind": "other",
+    "wrong_translations": ["Second Chance", "Bắt Đầu Mới"]
+  },
+  {
+    "source_terms": ["Change fate", "Alter destiny", "운명을 바꾸다", "改變命運", "逆天改命"],
+    "canonical_vi": "Thay Đổi Số Phận",
+    "kind": "other",
+    "wrong_translations": ["Change Fate", "Đổi Số Mệnh"]
+  },
+  {
+    "source_terms": ["This time", "This life", "이번엔", "이번 생", "這次", "今生"],
+    "canonical_vi": "Lần Này",
+    "kind": "other",
+    "wrong_translations": ["This Time", "Lần Này Đây"],
+    "variants": ["Kiếp Này (this life)", "Lần Hồi Quy Này"]
+  },
+  {
+    "source_terms": ["Last time", "Previous timeline", "지난번", "上次", "前次"],
+    "canonical_vi": "Lần Trước",
+    "kind": "other",
+    "wrong_translations": ["Last Time", "Lần Trước Đó"],
+    "variants": ["Trong Kiếp Trước", "Dòng Thời Gian Cũ"]
+  },
+  {
+    "source_terms": ["Regression Count", "How many times", "회귀 횟수", "回歸次數"],
+    "canonical_vi": "Số Lần Hồi Quy",
+    "kind": "other",
+    "wrong_translations": ["Regression Count", "Số Lần Quay Lại"]
+  },
+  {
+    "source_terms": ["Original timeline", "Original future", "원래 미래", "原本的未來", "最初的時間線"],
+    "canonical_vi": "Dòng Thời Gian Gốc",
+    "kind": "other",
+    "wrong_translations": ["Original Timeline", "Tương Lai Gốc"]
+  },
+  {
+    "source_terms": ["Death flag", "Death event", "사망 플래그", "死亡旗幟", "死亡標記"],
+    "canonical_vi": "Dấu Hiệu Tử Vong",
+    "kind": "other",
+    "wrong_translations": ["Death Flag"],
+    "variants": ["Cờ Tử", "Điều Kiện Chết"]
+  },
+  {
+    "source_terms": ["Prevent", "Avoid", "Stop", "막다", "防止", "阻止", "阻擋"],
+    "canonical_vi": "Ngăn Chặn",
+    "kind": "other",
+    "wrong_translations": ["Prevent", "Cản Trở"],
+    "policy": "ngữ cảnh trọng sinh/hồi quy: 'ngăn chặn thảm kịch' chứ không phải 'cản trở'"
+  },
+  {
+    "source_terms": ["Catastrophe", "Disaster", "Ruin", "재앙", "災難", "滅亡", "崩潰"],
+    "canonical_vi": "Thảm Họa",
+    "kind": "other",
+    "wrong_translations": ["Catastrophe", "Disaster"],
+    "variants": ["Diệt Vong (destruction/extinction)", "Sụp Đổ (collapse)"]
+  }
+]

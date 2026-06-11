@@ -1,0 +1,216 @@
+[
+  {
+    "source_terms": ["Qi Refining", "Qi Refinement", "Body Strengthening", "1단계", "초급무인", "하급무인", "기운을 단련"],
+    "canonical_vi": "Luyện Khí",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Luyện Khí Tầng 1 / Tầng 2 / Tầng 3 ... Tầng 9",
+    "wrong_translations": ["Luyện Khí Nhất Tầng", "Nhất Tầng Luyện Khí"],
+    "policy": "Korean LN dùng số Ả Rập, KHÔNG dùng Hán Việt cho số tầng"
+  },
+  {
+    "source_terms": ["Foundation", "Foundation Establishment", "Innate Realm", "선천경", "기초무인", "중급무인"],
+    "canonical_vi": "Tiên Thiên",
+    "kind": "realm",
+    "realm_level_format": "Tiên Thiên Tầng 1 / Tầng 2 / Tầng 3",
+    "wrong_translations": ["Nền Tảng", "Thiên Bẩm", "Foundation"],
+    "meaning": "cảnh giới Tiên Thiên trong võ học Hàn — huyệt mạch mở, khí lực tuần hoàn tự nhiên"
+  },
+  {
+    "source_terms": ["Dan Field", "Danjeon", "단전", "丹田"],
+    "canonical_vi": "Đan Điền",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Trường Đan", "Vùng Năng Lượng", "Dan Field"],
+    "meaning": "trung tâm khí lực trong cơ thể — thuật ngữ murim chung Hàn/Trung"
+  },
+  {
+    "source_terms": ["Internal Energy", "Inner Energy", "Inner Ki", "내공", "內功", "기", "氣"],
+    "canonical_vi": "Nội Công",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Năng Lượng Nội Tâm", "Khí Nội", "Inner Energy", "Ki"],
+    "meaning": "nội lực trong cơ thể võ sĩ — thuật ngữ murim Hàn"
+  },
+  {
+    "source_terms": ["Qi", "Ki", "기운", "氣運", "기력", "氣力"],
+    "canonical_vi": "Khí Lực",
+    "kind": "other",
+    "wrong_translations": ["Năng Lượng", "Lực Lượng", "Ki"],
+    "policy": "Khí Lực cho tổng quát; Nội Công cho lực đã tu luyện bên trong"
+  },
+  {
+    "source_terms": ["Sword Energy", "Sword Qi", "검기", "劍氣"],
+    "canonical_vi": "Kiếm Khí",
+    "kind": "technique",
+    "wrong_translations": ["Năng Lượng Kiếm", "Sword Energy"]
+  },
+  {
+    "source_terms": ["Sword Intent", "Sword Will", "검의", "劍意"],
+    "canonical_vi": "Kiếm Ý",
+    "kind": "technique",
+    "wrong_translations": ["Ý Chí Kiếm", "Ý Định Kiếm", "Sword Will"]
+  },
+  {
+    "source_terms": ["Sword Aura", "Sword Force", "검강", "劍罡"],
+    "canonical_vi": "Kiếm Cương",
+    "kind": "technique",
+    "wrong_translations": ["Hào Quang Kiếm", "Sword Aura"]
+  },
+  {
+    "source_terms": ["Blade Energy", "Saber Qi", "도기", "刀氣"],
+    "canonical_vi": "Đao Khí",
+    "kind": "technique",
+    "wrong_translations": ["Năng Lượng Đao", "Blade Energy"]
+  },
+  {
+    "source_terms": ["Cultivation Technique", "Martial Arts Manual", "무공", "武功", "무예", "武藝"],
+    "canonical_vi": "Võ Công",
+    "kind": "technique",
+    "priority": true,
+    "wrong_translations": ["Kỹ Năng Chiến Đấu", "Martial Skill", "Martial Arts"],
+    "meaning": "bộ võ học/công pháp trong murim Hàn"
+  },
+  {
+    "source_terms": ["Martial Arts Technique", "Technique", "초식", "招式", "무기 스킬"],
+    "canonical_vi": "Chiêu Thức",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật", "Chiêu Số", "Technique"]
+  },
+  {
+    "source_terms": ["Secret Manual", "Secret Arts", "비급", "秘笈", "비전", "秘傳"],
+    "canonical_vi": "Bí Tịch",
+    "kind": "item",
+    "wrong_translations": ["Sách Bí Mật", "Manual Bí Ẩn", "Secret Manual"]
+  },
+  {
+    "source_terms": ["Murim", "Martial Arts World", "무림", "武林"],
+    "canonical_vi": "Võ Lâm",
+    "kind": "place",
+    "priority": true,
+    "wrong_translations": ["Thế Giới Võ Thuật", "Murim World", "Giới Võ Lâm"]
+  },
+  {
+    "source_terms": ["Jianghu", "Kangho", "강호", "江湖"],
+    "canonical_vi": "Giang Hồ",
+    "kind": "place",
+    "wrong_translations": ["Thế Giới Ngầm", "Giang Hồ World", "Kangho"]
+  },
+  {
+    "source_terms": ["Sect", "Clan", "문파", "門派", "문", "門", "가문", "家門"],
+    "canonical_vi": "Môn Phái",
+    "kind": "organization",
+    "wrong_translations": ["Tổ Chức", "Sect", "Gia Tộc"],
+    "variants": ["Gia Môn (gia tộc lớn)", "Phái (phong cách viết ngắn)"]
+  },
+  {
+    "source_terms": ["Sect Master", "Clan Leader", "문주", "門主", "장문인", "掌門人"],
+    "canonical_vi": "Môn Chủ",
+    "kind": "title",
+    "wrong_translations": ["Lãnh Đạo Phái", "Sect Master"],
+    "variants": ["Chưởng Môn (truyền thống hơn)"]
+  },
+  {
+    "source_terms": ["Elder", "Grand Elder", "장로", "長老"],
+    "canonical_vi": "Trưởng Lão",
+    "kind": "title",
+    "wrong_translations": ["Elder", "Người Già"]
+  },
+  {
+    "source_terms": ["Disciple", "Apprentice", "제자", "弟子"],
+    "canonical_vi": "Đệ Tử",
+    "kind": "title",
+    "wrong_translations": ["Học Trò", "Disciple"]
+  },
+  {
+    "source_terms": ["Master", "Teacher", "사부", "師父", "사범", "師範"],
+    "canonical_vi": "Sư Phụ",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Thầy", "Thầy Giáo", "Master", "Teacher"]
+  },
+  {
+    "source_terms": ["Senior Brother", "Senior Martial Brother", "사형", "師兄", "사백", "師伯"],
+    "canonical_vi": "Sư Huynh",
+    "kind": "title",
+    "wrong_translations": ["Anh Lớn Hơn", "Senior Brother"]
+  },
+  {
+    "source_terms": ["Senior Sister", "Senior Martial Sister", "사저", "師姐"],
+    "canonical_vi": "Sư Tỷ",
+    "kind": "title",
+    "wrong_translations": ["Chị Lớn Hơn", "Senior Sister"]
+  },
+  {
+    "source_terms": ["Junior Brother", "Junior Martial Brother", "사제", "師弟"],
+    "canonical_vi": "Sư Đệ",
+    "kind": "title",
+    "wrong_translations": ["Đàn Em", "Junior Brother"]
+  },
+  {
+    "source_terms": ["Junior Sister", "Junior Martial Sister", "사매", "師妹"],
+    "canonical_vi": "Sư Muội",
+    "kind": "title",
+    "wrong_translations": ["Đàn Em Gái", "Junior Sister"]
+  },
+  {
+    "source_terms": ["Orthodox Faction", "Justice Faction", "정파", "正派"],
+    "canonical_vi": "Chính Phái",
+    "kind": "organization",
+    "wrong_translations": ["Phe Chính Nghĩa", "Orthodox Faction"]
+  },
+  {
+    "source_terms": ["Evil Faction", "Demonic Faction", "사파", "邪派", "마교", "魔敎"],
+    "canonical_vi": "Tà Phái",
+    "kind": "organization",
+    "wrong_translations": ["Phe Ác", "Evil Side"],
+    "variants": ["Ma Giáo (demonic cult)"]
+  },
+  {
+    "source_terms": ["Heavenly Demon", "Cheon Ma", "천마", "天魔"],
+    "canonical_vi": "Thiên Ma",
+    "kind": "title",
+    "wrong_translations": ["Quỷ Trời", "Heavenly Devil", "Cheon Ma"]
+  },
+  {
+    "source_terms": ["Absolute Heaven", "Heavenly Realm", "절대경", "絶對境", "무결경"],
+    "canonical_vi": "Tuyệt Đối Cảnh",
+    "kind": "realm",
+    "realm_level_format": "Tuyệt Đối Cảnh Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Cảnh Giới Tuyệt Đối", "Absolute Realm"]
+  },
+  {
+    "source_terms": ["Transcendent Realm", "Profound Realm", "초월경", "超越境", "현경", "玄境"],
+    "canonical_vi": "Siêu Việt Cảnh",
+    "kind": "realm",
+    "realm_level_format": "Siêu Việt Cảnh Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Transcendent", "Siêu Xuất"]
+  },
+  {
+    "source_terms": ["Regression", "Return", "회귀", "回歸", "되돌아가다"],
+    "canonical_vi": "Hồi Quy",
+    "kind": "other",
+    "wrong_translations": ["Tái Sinh", "Quay Lại", "Regression"],
+    "meaning": "trở về thời điểm trước — khác đầu thai (reincarnation)"
+  },
+  {
+    "source_terms": ["Reincarnation", "Rebirth", "환생", "還生", "전생", "前生"],
+    "canonical_vi": "Chuyển Sinh",
+    "kind": "other",
+    "wrong_translations": ["Tái Sinh Vào Thân Mới", "Rebirth"],
+    "variants": ["Luân Hồi (karma reincarnation)", "Tiền Kiếp (previous life)"]
+  },
+  {
+    "source_terms": ["Meridians", "Energy Channels", "경맥", "經脈", "기혈", "氣穴"],
+    "canonical_vi": "Kinh Mạch",
+    "kind": "other",
+    "wrong_translations": ["Kênh Năng Lượng", "Meridians"],
+    "variants": ["Huyệt Đạo (acupoint/pressure point)"]
+  },
+  {
+    "source_terms": ["Innate talent", "Martial Talent", "무재", "武才", "재능", "才能"],
+    "canonical_vi": "Võ Tài",
+    "kind": "other",
+    "wrong_translations": ["Tài Năng Bẩm Sinh", "Martial Talent"]
+  }
+]

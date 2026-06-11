@@ -1,0 +1,173 @@
+[
+  {
+    "source_terms": ["Spiritual Realm", "Spirit Realm", "Tâm Linh Giới", "灵界", "精神界"],
+    "canonical_vi": "Linh Giới",
+    "kind": "place",
+    "wrong_translations": ["Thế Giới Tâm Linh", "Spirit World"]
+  },
+  {
+    "source_terms": ["Demon Realm", "Demon World", "Quỷ Giới", "魔界", "鬼界"],
+    "canonical_vi": "Ma Giới",
+    "kind": "place",
+    "wrong_translations": ["Thế Giới Quỷ", "Demon World"],
+    "variants": ["Quỷ Giới (ghost realm — khác)", "Địa Phủ (underworld)"]
+  },
+  {
+    "source_terms": ["Void", "Chaos", "Hư Không", "虚空", "混沌"],
+    "canonical_vi": "Hư Không",
+    "kind": "place",
+    "wrong_translations": ["Khoảng Trống", "Void"],
+    "variants": ["Hỗn Độn (chaos)"]
+  },
+  {
+    "source_terms": ["World Tree", "Sacred Tree", "World Pillar", "Thần Thụ", "世界树"],
+    "canonical_vi": "Thần Thụ",
+    "kind": "other",
+    "wrong_translations": ["Cây Thế Giới", "World Tree"]
+  },
+  {
+    "source_terms": ["Fate", "Destiny", "Fortune", "Thiên Mệnh", "天命", "命运"],
+    "canonical_vi": "Thiên Mệnh",
+    "kind": "other",
+    "wrong_translations": ["Số Phận", "Destiny", "Fate"],
+    "variants": ["Vận Mệnh (personal fate)", "Duyên Phận (destined connection)"]
+  },
+  {
+    "source_terms": ["Heavenly Dao", "Way of Heaven", "Thiên Đạo", "天道"],
+    "canonical_vi": "Thiên Đạo",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Đạo Trời", "Way of Heaven", "Heavenly Way"]
+  },
+  {
+    "source_terms": ["Law", "Laws of Heaven", "Luật Tắc", "法则", "天则"],
+    "canonical_vi": "Pháp Tắc",
+    "kind": "other",
+    "wrong_translations": ["Luật Lệ", "Law"],
+    "meaning": "quy tắc căn bản chi phối thế giới — cao hơn Đạo cụ thể"
+  },
+  {
+    "source_terms": ["Reincarnation Cycle", "Six Paths", "Lục Đạo", "六道", "轮回"],
+    "canonical_vi": "Lục Đạo Luân Hồi",
+    "kind": "other",
+    "wrong_translations": ["Six Paths", "Reincarnation"],
+    "variants": ["Luân Hồi (cycle of reincarnation)"]
+  },
+  {
+    "source_terms": ["Karma", "Sin", "Nghiệp Chướng", "业障", "孽缘"],
+    "canonical_vi": "Nghiệp Chướng",
+    "kind": "other",
+    "wrong_translations": ["Tội Lỗi", "Karma", "Báo Ứng"]
+  },
+  {
+    "source_terms": ["Calamity", "Heavenly Calamity", "Thiên Tai", "天灾", "劫难"],
+    "canonical_vi": "Thiên Kiếp",
+    "kind": "other",
+    "wrong_translations": ["Thảm Họa", "Calamity"],
+    "variants": ["Đại Kiếp Nạn (great calamity)"]
+  },
+  {
+    "source_terms": ["Divination", "Prophecy", "Oracle", "Tiên Tri", "占卜", "预言"],
+    "canonical_vi": "Tiên Tri",
+    "kind": "technique",
+    "wrong_translations": ["Bói Toán", "Divination", "Oracle"]
+  },
+  {
+    "source_terms": ["Illusion", "Illusion Art", "Ảo Thuật", "幻术", "幻象"],
+    "canonical_vi": "Ảo Thuật",
+    "kind": "technique",
+    "wrong_translations": ["Phép Ảo", "Illusion Magic"]
+  },
+  {
+    "source_terms": ["Soul Art", "Soul Technique", "Hồn Thuật", "魂技", "灵魂术"],
+    "canonical_vi": "Hồn Thuật",
+    "kind": "technique",
+    "wrong_translations": ["Soul Skill", "Kỹ Năng Linh Hồn"]
+  },
+  {
+    "source_terms": ["Space", "Spatial Art", "Không Gian", "空间", "空间法则"],
+    "canonical_vi": "Không Gian",
+    "kind": "technique",
+    "wrong_translations": ["Space Technique"],
+    "variants": ["Không Gian Pháp Tắc (law of space)"]
+  },
+  {
+    "source_terms": ["Time", "Time Art", "Thời Gian", "时间", "时间法则"],
+    "canonical_vi": "Thời Gian",
+    "kind": "technique",
+    "wrong_translations": ["Time Technique"],
+    "variants": ["Thời Gian Pháp Tắc (law of time)"]
+  },
+  {
+    "source_terms": ["Elemental", "Elements", "Fire", "Water", "Earth", "Wind"],
+    "canonical_vi": "Nguyên Tố",
+    "kind": "other",
+    "wrong_translations": ["Element"],
+    "policy": "Hỏa/Thủy/Thổ/Phong/Lôi/Mộc/Kim — Hán Việt cho tên nguyên tố trong huyen_huyen"
+  },
+  {
+    "source_terms": ["Divine Beast", "Sacred Beast", "Thần Thú", "神兽", "圣兽"],
+    "canonical_vi": "Thần Thú",
+    "kind": "other",
+    "wrong_translations": ["Holy Beast", "Sacred Monster"]
+  },
+  {
+    "source_terms": ["Spirit Beast", "Monster Beast", "Linh Thú", "灵兽", "妖兽"],
+    "canonical_vi": "Linh Thú",
+    "kind": "other",
+    "wrong_translations": ["Spirit Animal", "Monster"],
+    "variants": ["Yêu Thú (demonic beast)", "Huyền Thú (mysterious beast)"]
+  },
+  {
+    "source_terms": ["Demonic Beast", "Yêu Thú", "妖兽", "邪兽"],
+    "canonical_vi": "Yêu Thú",
+    "kind": "other",
+    "wrong_translations": ["Demon Monster", "Evil Beast"]
+  },
+  {
+    "source_terms": ["Talisman", "Spiritual Talisman", "Phù Lục", "符箓", "灵符"],
+    "canonical_vi": "Phù Lục",
+    "kind": "item",
+    "wrong_translations": ["Talisman", "Bùa"]
+  },
+  {
+    "source_terms": ["Array", "Formation", "Trận Pháp", "阵法", "阵列"],
+    "canonical_vi": "Trận Pháp",
+    "kind": "technique",
+    "priority": true,
+    "wrong_translations": ["Đội Hình", "Formation", "Array"]
+  },
+  {
+    "source_terms": ["Seal", "Spiritual Seal", "Ấn Pháp", "印法", "封印"],
+    "canonical_vi": "Ấn Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Seal Technique", "Dấu Ấn"],
+    "variants": ["Phong Ấn (seal/lock)", "Ấn Quyết (hand seal)"]
+  },
+  {
+    "source_terms": ["Ancient God", "Ancient Deity", "Thượng Cổ Thần", "上古神", "远古神灵"],
+    "canonical_vi": "Thượng Cổ Thần",
+    "kind": "other",
+    "wrong_translations": ["Ancient God", "Old God"]
+  },
+  {
+    "source_terms": ["Chaos God", "Primordial God", "Hỗn Độn Thần", "混沌之神"],
+    "canonical_vi": "Hỗn Độn Chi Thần",
+    "kind": "other",
+    "wrong_translations": ["Chaos God", "Primordial Deity"]
+  },
+  {
+    "source_terms": ["Opportunity", "Chance", "Fate Chance", "Cơ Duyên", "机缘", "缘分"],
+    "canonical_vi": "Cơ Duyên",
+    "kind": "other",
+    "wrong_translations": ["Cơ Hội", "Opportunity", "Lucky Chance"],
+    "meaning": "duyên phận gặp gỡ vật quý hoặc bí kíp — quan trọng trong truyện huyền huyễn"
+  },
+  {
+    "source_terms": ["Inheritance", "Legacy", "Di Tích", "传承", "遗物"],
+    "canonical_vi": "Truyền Thừa",
+    "kind": "other",
+    "wrong_translations": ["Thừa Kế", "Legacy", "Inheritance"],
+    "meaning": "di sản tu luyện/kỹ thuật từ cao nhân đời trước"
+  }
+]

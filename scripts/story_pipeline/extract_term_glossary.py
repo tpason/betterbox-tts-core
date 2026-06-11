@@ -44,7 +44,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from extract_char_map import fetch_chapters, get_chapter_text, story_slug_from_row, unload_ollama_model
 from story_memory import DEFAULT_MEMORY_ROOT
 
 try:
@@ -96,8 +95,15 @@ _EN_PHRASE_STOP_FIRST = {
 _EN_PHRASE_RE = re.compile(
     r"\b([A-Z][a-zA-Z'\-]+(?:\s+(?:of|the|at|in|and|[A-Z][a-zA-Z'\-]+)){1,6})\b"
 )
-# Term trong 《》, "..." hoặc '...' có chữ hoa — thường là tên bí kíp/kỹ năng.
-_BRACKET_TERM_RE = re.compile(r"[《\[]([^《》\[\]\n]{3,60})[》\]]")
+# Term trong 《》, 【】 hoặc [] — thường là tên bí kíp/kỹ năng/system skill.
+_BRACKET_TERM_RE = re.compile(r"[《【\[]([^《》【】\[\]\n]{3,60})[》】\]]")
+_BRACKET_TERM_HINT_RE = re.compile(
+    r"(skill|art|technique|seal|sword|blade|fist|palm|step|footwork|manual|scripture|"
+    r"method|formation|array|spell|curse|fire|flame|lightning|thunder|dragon|demon|"
+    r"công|pháp|bí|kỹ|thuật|ấn|kiếm|đao|quyền|chưởng|bộ|thân|phù|trận|chú|hỏa|lôi|long|ma)",
+    re.IGNORECASE,
+)
+_CJK_RE = re.compile(r"[㐀-鿿぀-ヿ가-힯]")
 
 # Cụm Capitalized tiếng Việt (>=2 từ có dấu): "Tam Hoa Tụ Đỉnh", "Thiên Môn".
 _VI_PHRASE_RE = re.compile(
@@ -124,15 +130,33 @@ def _first_sentence_with(text: str, phrase: str) -> str:
     return re.sub(r"\s+", " ", text[start:end]).strip()[:200]
 
 
+def _looks_like_bracket_term(phrase: str) -> bool:
+    """Conservative filter for one-off bracket terms to avoid ordinary quoted text."""
+    if len(phrase) < 3 or len(phrase) > 60:
+        return False
+    if any(ch in phrase for ch in ".?!:;。！？"):
+        return False
+    words = phrase.split()
+    if len(words) > 8:
+        return False
+    if _CJK_RE.search(phrase):
+        return True
+    caps = [w for w in words if w[:1].isupper()]
+    if len(caps) >= 2:
+        return True
+    return bool(_BRACKET_TERM_HINT_RE.search(phrase))
+
+
 def mine_candidate_terms(
     texts: list[str],
     *,
     lang: str = "en",
     min_count: int = 3,
     max_terms: int = 50,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Tìm recurring candidate terms. Returns [{term, context}] sorted by frequency."""
     counts: Counter[str] = Counter()
+    bracket_counts: Counter[str] = Counter()
     contexts: dict[str, str] = {}
     phrase_re = _EN_PHRASE_RE if lang == "en" else _VI_PHRASE_RE
 
@@ -155,19 +179,30 @@ def mine_candidate_terms(
                 contexts[phrase] = _first_sentence_with(text, m.group(1))
         for m in _BRACKET_TERM_RE.finditer(text):
             phrase = _clean_phrase(m.group(1))
-            if len(phrase) < 3 or not any(c.isupper() for c in phrase):
+            if not _looks_like_bracket_term(phrase):
                 continue
-            counts[phrase] += 1
+            bracket_counts[phrase] += 1
             if phrase not in contexts:
                 contexts[phrase] = _first_sentence_with(text, m.group(1))
 
     # Gộp phrase con vào phrase dài hơn nếu phrase dài phổ biến tương đương
     # (ví dụ "Three Flowers" vs "Three Flowers Gathered at the Peak").
-    results = [
-        {"term": term, "context": contexts.get(term, "")}
-        for term, cnt in counts.most_common()
-        if cnt >= min_count
-    ]
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for term, _cnt in bracket_counts.most_common():
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({"term": term, "context": contexts.get(term, ""), "is_bracketed": True})
+    for term, cnt in counts.most_common():
+        if cnt < min_count:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({"term": term, "context": contexts.get(term, ""), "is_bracketed": False})
     return results[:max_terms]
 
 
@@ -186,6 +221,7 @@ Với mỗi term, trả về JSON object:
 
 Quy tắc:
 - Term là TÊN NGƯỜI: canonical_vi giữ nguyên phiên âm gốc, kind="person", không cần wrong_translations.
+- Term trong 《》, 【】 hoặc [] thường là kỹ năng/công pháp/bí kíp/system skill: dịch theo policy thể loại, KHÔNG giữ nguyên tiếng Anh/Trung/Hàn nếu đó là thuật ngữ có thể Việt hóa.
 - Chỉ trả về JSON array, không markdown, không giải thích.
 - Bỏ qua term không phải danh từ riêng/thuật ngữ (cụm câu thông thường) bằng cách không đưa vào kết quả."""
 
@@ -202,7 +238,7 @@ Trả về JSON array glossary cho các term trên (bỏ qua cụm không phải
 def call_ollama_glossary(
     base_url: str,
     model: str,
-    candidates: list[dict[str, str]],
+    candidates: list[dict[str, Any]],
     *,
     story_title: str,
     genre: str,
@@ -211,7 +247,9 @@ def call_ollama_glossary(
     timeout: int = 600,
 ) -> list[dict[str, Any]]:
     term_block = "\n".join(
-        f'- "{c["term"]}"' + (f' — ngữ cảnh: {c["context"]}' if c.get("context") else "")
+        f'- "{c["term"]}"'
+        + (" [bracketed skill/term]" if c.get("is_bracketed") else "")
+        + (f' — ngữ cảnh: {c["context"]}' if c.get("context") else "")
         for c in candidates
     )
     system = GLOSSARY_SYSTEM.format(policy=term_policy_for_genre(genre))
@@ -346,6 +384,8 @@ def update_term_glossary(
     unload_after: bool = False,
 ) -> dict[str, Any]:
     """Mine + translate + merge glossary. Returns summary dict."""
+    from extract_char_map import fetch_chapters, get_chapter_text, story_slug_from_row, unload_ollama_model
+
     rows = fetch_chapters(
         story_title=story_title,
         story_id=story_id,

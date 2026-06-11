@@ -18,6 +18,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MEMORY_ROOT = ROOT / "story_data" / "story_memory"
+SEED_GLOSSARIES_ROOT = ROOT / "story_data" / "seed_glossaries"
+
+_seed_glossary_cache: dict[str, list[dict[str, Any]]] = {}
 
 
 DEFAULT_ROLE_POLICIES: dict[str, list[str]] = {
@@ -63,6 +66,7 @@ class StoryMemory:
     glossary: list[dict[str, Any]] = field(default_factory=list)
     aliases: dict[str, str] = field(default_factory=dict)
     replacements: dict[str, str] = field(default_factory=dict)
+    recaps: dict[str, dict[str, Any]] = field(default_factory=dict)
     loaded_files: list[Path] = field(default_factory=list)
 
     @property
@@ -75,6 +79,7 @@ class StoryMemory:
             or self.glossary
             or self.aliases
             or self.replacements
+            or self.recaps
         )
 
 
@@ -293,6 +298,38 @@ def _collect_glossary_replacements(glossary: list[dict[str, Any]]) -> dict[str, 
     return replacements
 
 
+def seed_glossary_replacements(genre: str) -> dict[str, str]:
+    """Return wrong_translations and forbidden_literal from seed glossary as a replacements dict.
+
+    Used as a deterministic fallback: even if the LLM ignores the seed context,
+    these known-bad strings get normalized post-hoc. Story-specific replacements take priority.
+    Only includes items with priority=True to avoid over-aggressive normalization.
+    """
+    replacements: dict[str, str] = {}
+    for item in load_seed_glossary(genre):
+        if not item.get("priority"):
+            continue
+        canonical = str(item.get("canonical_vi") or item.get("vi") or item.get("canonical") or "").strip()
+        if not canonical:
+            continue
+        for key in ("wrong_translations", "forbidden_literal"):
+            for surface in _string_list(item.get(key)):
+                if surface and surface not in replacements:
+                    replacements[surface] = canonical
+    return replacements
+
+
+def apply_seed_glossary_replacements(memory: StoryMemory, genre: str) -> StoryMemory:
+    """Add high-confidence seed replacements without overriding story-specific memory."""
+    seed_replacements = seed_glossary_replacements(genre)
+    if not seed_replacements:
+        return memory
+    merged = dict(seed_replacements)
+    merged.update(memory.replacements)
+    memory.replacements = merged
+    return memory
+
+
 def load_story_memory(
     *,
     story_memory_dir: str = "",
@@ -347,10 +384,117 @@ def load_story_memory(
     if memory.aliases:
         memory.loaded_files.append(aliases_path)
 
+    recaps_path = base / "recaps.json"
+    recaps_data = _load_json(recaps_path)
+    if isinstance(recaps_data, dict):
+        memory.recaps = {
+            str(k): v for k, v in recaps_data.items() if isinstance(v, dict) and v.get("recap")
+        }
+        if memory.recaps:
+            memory.loaded_files.append(recaps_path)
+
     memory.replacements.update(memory.aliases)
     memory.replacements.update(_collect_character_replacements(memory.characters))
     memory.replacements.update(_collect_glossary_replacements(memory.glossary))
     return memory
+
+
+def _locked_json_update(path: Path, update_fn) -> bool:
+    """Atomic read-modify-write một JSON dict file, an toàn với nhiều worker.
+
+    - Lock per-file qua fcntl.flock trên `<path>.lock`; reload JSON mới nhất
+      TRONG lock rồi mới gọi update_fn(data) → data mới.
+    - Ghi temp file cùng dir + os.replace() (atomic trên cùng filesystem).
+    - Fail-closed: fcntl không khả dụng (hệ filesystem/OS lạ) → KHÔNG ghi,
+      trả False — caller coi như warning, tránh risk corrupt JSON.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return False
+    import os as _os
+    import tempfile as _tempfile
+
+    path = _resolve(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    try:
+        with open(lock_path, "w", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            current = _load_json(path)
+            data = current if isinstance(current, dict) else {}
+            updated = update_fn(dict(data))
+            if not isinstance(updated, dict):
+                return False
+            fd, tmp_name = _tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as tmp:
+                    json.dump(updated, tmp, ensure_ascii=False, indent=2)
+                _os.replace(tmp_name, path)
+            except BaseException:
+                try:
+                    _os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        return True
+    except OSError:
+        return False
+
+
+def save_chapter_recap(
+    directory: str | Path,
+    chapter_number: int,
+    recap: str,
+    *,
+    max_entries: int = 50,
+) -> bool:
+    """Ghi recap 1 chương vào recaps.json (atomic + locked). Giữ max_entries
+    chương gần nhất. Trả False nếu không ghi được — caller chỉ log warning."""
+    recap = (recap or "").strip()
+    if not recap or chapter_number <= 0:
+        return False
+    path = _resolve(Path(directory) / "recaps.json")
+
+    def _update(data: dict[str, Any]) -> dict[str, Any]:
+        from datetime import datetime, timezone
+        data[str(chapter_number)] = {
+            "recap": recap,
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        # Prune: giữ các chương mới nhất theo chapter number
+        def _ch(k: str) -> int:
+            try:
+                return int(k)
+            except ValueError:
+                return -1
+        keys = sorted((k for k in data if _ch(k) > 0), key=_ch, reverse=True)
+        return {k: data[k] for k in keys[:max_entries]}
+
+    return _locked_json_update(path, _update)
+
+
+def build_recap_context(memory: StoryMemory, current_chapter: int, *, max_prev: int = 3, max_chars: int = 600) -> str:
+    """Recap của <= max_prev chương liền trước current_chapter (chỉ chương nhỏ hơn —
+    an toàn với out-of-order processing). Empty nếu không có gì."""
+    if current_chapter <= 0 or not memory.recaps:
+        return ""
+    prev: list[tuple[int, str]] = []
+    for key, entry in memory.recaps.items():
+        try:
+            num = int(key)
+        except ValueError:
+            continue
+        if 0 < num < current_chapter:
+            recap = str(entry.get("recap") or "").strip()
+            if recap:
+                prev.append((num, recap))
+    if not prev:
+        return ""
+    prev.sort(reverse=True)
+    lines = [f"- Chương {num}: {recap}" for num, recap in prev[:max_prev]]
+    lines.reverse()  # in theo thứ tự thời gian
+    return _truncate("\n".join(lines), max_chars)
 
 
 def apply_story_memory_replacements(text: str, memory: StoryMemory) -> str:
@@ -496,6 +640,7 @@ def _format_glossary_item(item: dict[str, Any]) -> str:
     if source:
         parts.append(f"source={source}")
     for key, label in (
+        ("realm_level_format", "format tầng/cấp"),
         ("meaning", "ý nghĩa"),
         ("tone", "sắc thái"),
         ("policy", "policy"),
@@ -510,20 +655,131 @@ def _format_glossary_item(item: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+def load_seed_glossary(genre: str) -> list[dict[str, Any]]:
+    """Load seed glossary for a genre from story_data/seed_glossaries/{genre}.json.
+
+    Results are cached in-process. Returns [] if file not found or genre is empty.
+    Multiple genres can be passed as comma-separated string; each file is loaded.
+    """
+    if not genre:
+        return []
+    if genre in _seed_glossary_cache:
+        return _seed_glossary_cache[genre]
+    items: list[dict[str, Any]] = []
+    for g in genre.replace(",", " ").split():
+        path = SEED_GLOSSARIES_ROOT / f"{g.strip()}.json"
+        data = _load_json(path)
+        if isinstance(data, list):
+            items.extend(item for item in data if isinstance(item, dict))
+    _seed_glossary_cache[genre] = items
+    return items
+
+
+def _format_seed_item(item: dict[str, Any]) -> str:
+    """Compact seed item rendering — strips source_terms (filter-only), keeps instructional fields."""
+    canonical = item.get("canonical_vi") or item.get("vi") or item.get("canonical") or item.get("id") or ""
+    parts = [canonical if canonical else "Thuật ngữ"]
+    for key, label in (
+        ("realm_level_format", "format"),
+        ("policy", "rule"),
+        ("wrong_translations", "✗"),
+        ("forbidden", "cấm"),
+        ("forbidden_literal", "cấm literal"),
+        ("variants", "✓"),
+    ):
+        value = item.get(key)
+        if not value:
+            continue
+        if isinstance(value, list):
+            text_val = "/".join(str(v) for v in value[:4])
+            if len(value) > 4:
+                text_val += "/..."
+        else:
+            text_val = str(value)
+        parts.append(f"{label}={text_val}")
+    return " | ".join(parts)
+
+
+def _glossary_surfaces(item: dict[str, Any]) -> list[str]:
+    surfaces: list[str] = []
+    for key in (
+        "source",
+        "source_terms",
+        "canonical_vi",
+        "vi",
+        "canonical",
+        "variants",
+        "wrong_translations",
+        "forbidden",
+        "forbidden_literal",
+    ):
+        value = item.get(key)
+        if isinstance(value, str):
+            surfaces.append(value)
+        else:
+            surfaces.extend(_string_list(value))
+    return [s for s in surfaces if s]
+
+
+def _relevant_seed_glossary(
+    seed_items: list[dict[str, Any]],
+    story_glossary: list[dict[str, Any]],
+    text: str,
+    max_items: int = 10,
+) -> list[dict[str, Any]]:
+    """Filter seed items relevant to text, excluding those already in story glossary."""
+    story_surfaces = {
+        _normalize_key(surface)
+        for item in story_glossary
+        for surface in _glossary_surfaces(item)
+    }
+    text_key = _normalize_key(text)
+    relevant: list[dict[str, Any]] = []
+    priority: list[dict[str, Any]] = []
+    for item in seed_items:
+        surfaces = _glossary_surfaces(item)
+        if any(_normalize_key(surface) in story_surfaces for surface in surfaces):
+            continue
+        if item.get("priority"):
+            priority.append(item)
+        if any(_text_has_surface(text_key, surface) for surface in surfaces):
+            relevant.append(item)
+    merged: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for item in [*relevant, *priority]:
+        ident = id(item)
+        if ident not in seen:
+            seen.add(ident)
+            merged.append(item)
+    return merged[:max_items]
+
+
 def build_story_memory_prompt(
     memory: StoryMemory,
     text: str,
     *,
     genre: str = "",
     max_chars: int = 5200,
+    current_chapter: int = 0,
 ) -> str:
-    """Build compact story-specific prompt context for the current chunk."""
+    """Build compact story-specific prompt context for the current chunk.
+
+    current_chapter > 0 bật block recap các chương liền trước (continuity).
+    current_chapter == 0 (caller không truyền) → bỏ recaps, không đoán.
+    """
     sections: list[str] = []
 
     if memory.story_bible:
         sections.append("STORY BIBLE:\n" + _truncate(memory.story_bible, 1200))
     if memory.style_guide:
         sections.append("STYLE GUIDE:\n" + _truncate(memory.style_guide, 1200))
+
+    recap_block = build_recap_context(memory, current_chapter)
+    if recap_block:
+        sections.append(
+            "TÓM TẮT CÁC CHƯƠNG TRƯỚC (chỉ là bối cảnh để giữ mạch truyện và xưng hô — "
+            "KHÔNG dịch lại; nếu mâu thuẫn thì char map/glossary thắng):\n" + recap_block
+        )
 
     role_lines = DEFAULT_ROLE_POLICIES.get("default", [])
     if genre:
@@ -542,6 +798,15 @@ def build_story_memory_prompt(
     chars = _relevant_characters(memory, text)
     if chars:
         sections.append("NHÂN VẬT LIÊN QUAN TRONG ĐOẠN NÀY:\n" + "\n".join(_format_character(char) for char in chars))
+
+    seed_items = load_seed_glossary(genre)
+    if seed_items:
+        seed_relevant = _relevant_seed_glossary(seed_items, memory.glossary, text)
+        if seed_relevant:
+            sections.append(
+                "THUẬT NGỮ THỂ LOẠI (ưu tiên thấp hơn glossary truyện nếu mâu thuẫn):\n"
+                + "\n".join(_format_seed_item(item) for item in seed_relevant)
+            )
 
     glossary = _relevant_glossary(memory, text)
     if glossary:

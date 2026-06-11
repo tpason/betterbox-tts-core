@@ -1,0 +1,172 @@
+[
+  {
+    "source_terms": ["First Rank", "1st Rank", "Nhất Hạng", "一品", "初品"],
+    "canonical_vi": "Nhất Phẩm",
+    "kind": "realm",
+    "realm_level_format": "Nhất Phẩm / Nhị Phẩm / Tam Phẩm / Tứ Phẩm / Ngũ Phẩm / Lục Phẩm / Thất Phẩm / Bát Phẩm / Cửu Phẩm",
+    "wrong_translations": ["Hạng 1", "Cấp 1", "First Grade"],
+    "policy": "kiếm hiệp dùng hệ Phẩm (Nhất đến Cửu) — số Hán Việt"
+  },
+  {
+    "source_terms": ["Grandmaster", "Supreme Master", "Tuyệt Đỉnh", "絶頂", "宗师"],
+    "canonical_vi": "Tông Sư",
+    "kind": "realm",
+    "realm_level_format": "Tông Sư cấp → Đại Tông Sư → Thần Hóa",
+    "wrong_translations": ["Grandmaster", "Tuyệt Đỉnh Cao Thủ"]
+  },
+  {
+    "source_terms": ["Internal Arts", "Internal Energy", "Nội Công", "内功"],
+    "canonical_vi": "Nội Công",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Internal Energy", "Năng Lượng Bên Trong"]
+  },
+  {
+    "source_terms": ["External Arts", "Ngoại Công", "外功"],
+    "canonical_vi": "Ngoại Công",
+    "kind": "other",
+    "wrong_translations": ["External Energy", "Năng Lượng Bên Ngoài"]
+  },
+  {
+    "source_terms": ["Light Skill", "Lightness Skill", "Qinggong", "Khinh Công", "轻功"],
+    "canonical_vi": "Khinh Công",
+    "kind": "technique",
+    "priority": true,
+    "wrong_translations": ["Nhẹ Người", "Light Movement", "Khinh Thân"]
+  },
+  {
+    "source_terms": ["Palm Technique", "Palm Art", "Chưởng Pháp", "掌法"],
+    "canonical_vi": "Chưởng Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Lòng Bàn Tay", "Palm Technique"]
+  },
+  {
+    "source_terms": ["Fist Art", "Fist Technique", "Quyền Pháp", "拳法"],
+    "canonical_vi": "Quyền Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Đấm", "Fist Art"]
+  },
+  {
+    "source_terms": ["Finger Art", "Chỉ Pháp", "指法"],
+    "canonical_vi": "Chỉ Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Ngón Tay", "Finger Technique"]
+  },
+  {
+    "source_terms": ["Saber Art", "Saber Technique", "Đao Pháp", "刀法"],
+    "canonical_vi": "Đao Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Đao", "Saber Art"]
+  },
+  {
+    "source_terms": ["Spear Art", "Thương Pháp", "枪法"],
+    "canonical_vi": "Thương Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Giáo", "Spear Art"]
+  },
+  {
+    "source_terms": ["Acupoint", "Pressure Point", "Vital Point", "Huyệt Đạo", "穴道", "穴位"],
+    "canonical_vi": "Huyệt Đạo",
+    "kind": "other",
+    "wrong_translations": ["Điểm Huyệt", "Acupoint"]
+  },
+  {
+    "source_terms": ["Meridian", "Energy Channel", "Kinh Mạch", "经脉"],
+    "canonical_vi": "Kinh Mạch",
+    "kind": "other",
+    "wrong_translations": ["Mạch Năng Lượng", "Meridian"]
+  },
+  {
+    "source_terms": ["Jianghu", "Martial World", "Giang Hồ", "江湖"],
+    "canonical_vi": "Giang Hồ",
+    "kind": "place",
+    "priority": true,
+    "wrong_translations": ["Thế Giới Giang Hồ", "Jianghu"]
+  },
+  {
+    "source_terms": ["Sect", "Faction", "Môn Phái", "门派", "帮派"],
+    "canonical_vi": "Môn Phái",
+    "kind": "organization",
+    "wrong_translations": ["Sect", "Phái"]
+  },
+  {
+    "source_terms": ["Wulin", "Martial Forest", "Võ Lâm", "武林"],
+    "canonical_vi": "Võ Lâm",
+    "kind": "place",
+    "wrong_translations": ["Rừng Võ", "Wulin", "Martial World"]
+  },
+  {
+    "source_terms": ["Beggar Sect", "Beggars Guild", "Cái Bang", "丐帮"],
+    "canonical_vi": "Cái Bang",
+    "kind": "organization",
+    "wrong_translations": ["Hội Ăn Mày", "Beggar Sect"]
+  },
+  {
+    "source_terms": ["Wudang", "Shaolin", "Emei", "Huashan"],
+    "canonical_vi": "Võ Đang",
+    "kind": "organization",
+    "wrong_translations": ["Wudang", "Shaolin"],
+    "policy": "Phiên âm Hán Việt: Võ Đang / Thiếu Lâm / Nga Mi / Hoa Sơn / Côn Lôn"
+  },
+  {
+    "source_terms": ["Righteous Sects", "Chính Phái Môn", "正道"],
+    "canonical_vi": "Chính Đạo",
+    "kind": "organization",
+    "wrong_translations": ["Orthodox Sects", "Chính Nghĩa"]
+  },
+  {
+    "source_terms": ["Demonic Cult", "Evil Cult", "Tà Giáo", "邪教", "魔教"],
+    "canonical_vi": "Ma Giáo",
+    "kind": "organization",
+    "wrong_translations": ["Giáo Phái Ma Quỷ", "Demonic Cult"]
+  },
+  {
+    "source_terms": ["Senior Martial Brother", "Sư Huynh", "师兄"],
+    "canonical_vi": "Sư Huynh",
+    "kind": "title",
+    "wrong_translations": ["Anh Lớn", "Senior Brother"]
+  },
+  {
+    "source_terms": ["Senior Martial Sister", "Sư Tỷ", "师姐"],
+    "canonical_vi": "Sư Tỷ",
+    "kind": "title",
+    "wrong_translations": ["Chị Lớn", "Senior Sister"]
+  },
+  {
+    "source_terms": ["Shifu", "Master", "Sư Phụ", "师父"],
+    "canonical_vi": "Sư Phụ",
+    "kind": "title",
+    "wrong_translations": ["Thầy", "Master", "Shifu"]
+  },
+  {
+    "source_terms": ["Grandmaster", "Sect Founder", "Tổ Sư", "祖师"],
+    "canonical_vi": "Tổ Sư",
+    "kind": "title",
+    "wrong_translations": ["Người Sáng Lập", "Grandmaster"]
+  },
+  {
+    "source_terms": ["Hidden Weapon", "Dart", "Ám Khí", "暗器"],
+    "canonical_vi": "Ám Khí",
+    "kind": "item",
+    "wrong_translations": ["Vũ Khí Ẩn", "Hidden Weapon", "Dart"]
+  },
+  {
+    "source_terms": ["Poison", "Venom", "Độc", "毒"],
+    "canonical_vi": "Độc",
+    "kind": "other",
+    "wrong_translations": ["Poison", "Chất Độc"]
+  },
+  {
+    "source_terms": ["Elixir", "Medicinal Wine", "Thuốc", "药酒", "丹药"],
+    "canonical_vi": "Thuốc",
+    "kind": "item",
+    "wrong_translations": ["Elixir", "Medicine"],
+    "variants": ["Đan Dược (pill)", "Thuốc Rượu (medicinal wine)"]
+  },
+  {
+    "source_terms": ["Manual", "Martial Arts Book", "Bí Kíp", "秘籍"],
+    "canonical_vi": "Bí Kíp",
+    "kind": "item",
+    "wrong_translations": ["Manual", "Sách Bí Mật"]
+  }
+]

@@ -527,13 +527,62 @@ def _check_resources(args: argparse.Namespace, *, label: str = "", unloaded_mode
 # ─── End resource guard ────────────────────────────────────────────────────────
 
 
+def _dedupe_repeated_paragraphs(text: str, *, min_block: int = 120) -> tuple[str, int]:
+    """Remove exact duplicate long paragraphs produced by model loops.
+
+    This is intentionally narrow: only exact repeated paragraphs of substantial
+    length are removed, matching the `repeated_content` quality gate.
+    """
+    if not text:
+        return text, 0
+    parts = re.split(r"\n\s*\n", text.strip())
+    seen: set[str] = set()
+    kept: list[str] = []
+    removed = 0
+    for part in parts:
+        paragraph = part.strip()
+        if not paragraph:
+            continue
+        if len(paragraph) >= min_block and paragraph in seen:
+            removed += 1
+            continue
+        if len(paragraph) >= min_block:
+            seen.add(paragraph)
+        kept.append(paragraph)
+    if not removed:
+        return text, 0
+    return "\n\n".join(kept).strip(), removed
+
+
+_CJK_PAREN_RE = re.compile(r"\s*[\(（][^\n()（）]{0,80}[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af][^\n()（）]{0,80}[\)）]")
+
+
+def _strip_cjk_parentheticals(text: str) -> tuple[str, int]:
+    """Remove source-script parentheticals like `Đoạn Sơn Kiếm Pháp (斷岳劍法)`.
+
+    Korean cultivation chapters often include Hanja/Hangul in parentheses after
+    an already translated technique/title. Keeping those brackets trips the CJK
+    contamination gate and hurts TTS, but CJK outside parentheses must still fail.
+    """
+    if not text:
+        return text, 0
+    return _CJK_PAREN_RE.subn("", text)
+
+
 def read_formatted_output(output_path: Path, job: dict, *, write_back: bool, label: str) -> str:
     content = output_path.read_text(encoding="utf-8")
     formatted = format_reader_polished_content(content, job)
-    if formatted and write_back and formatted.strip() != content.strip():
-        output_path.write_text(formatted.strip() + "\n", encoding="utf-8")
+    result = formatted or content.strip()
+    result, removed_cjk_parentheticals = _strip_cjk_parentheticals(result)
+    if removed_cjk_parentheticals:
+        log(f"[CJK_CLEAN] removed {removed_cjk_parentheticals} source-script parenthetical(s) from {label} output")
+    result, removed_repeats = _dedupe_repeated_paragraphs(result)
+    if removed_repeats:
+        log(f"[DEDUP] removed {removed_repeats} repeated paragraph(s) from {label} output")
+    if write_back and result.strip() != content.strip():
+        output_path.write_text(result.strip() + "\n", encoding="utf-8")
         log(f"[FORMAT] cleaned {label} output: {output_path}")
-    return formatted or content.strip()
+    return result
 
 
 def read_formatted_polished_output(output_path: Path, job: dict, *, write_back: bool) -> str:
@@ -931,7 +980,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     if output_path.exists() and not args.overwrite:
         # Output cũ cũng phải qua quality gate trước khi ghi DB — output hỏng
         # (từ run cũ hoặc trước khi có gate) sẽ rơi xuống re-run thay vì skip.
-        existing_polished = read_formatted_polished_output(output_path, job, write_back=False)
+        existing_polished = read_formatted_polished_output(output_path, job, write_back=True)
         existing_blocking: list[str] = []
         if str(getattr(args, "quality_gate", "block") or "block").lower() == "block":
             existing_blocking, _ = _quality_check(
@@ -954,18 +1003,20 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                     payload.get("translated_text_path")
                     or (Path(args.translated_output_root) / story_slug_for_job(job, input_path) / output_path.name).as_posix()
                 )
+            existing_translated = (
+                read_formatted_output(Path(translated_path), job, write_back=True, label="translated")
+                if translated_path and Path(translated_path).exists()
+                else None
+            )
             repo.update_chapter_text_outputs(
                 job["chapter_id"],
                 translated_text_path=translated_path,
                 polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
-                translated_text_content=Path(translated_path).read_text(encoding="utf-8") if translated_path and Path(translated_path).exists() else None,
+                translated_text_content=existing_translated,
                 polished_text_content=existing_polished,
             )
-            if translated_path and Path(translated_path).exists():
-                maybe_update_translated_chapter_title(
-                    job,
-                    read_formatted_output(Path(translated_path), job, write_back=False, label="translated"),
-                )
+            if existing_translated:
+                maybe_update_translated_chapter_title(job, existing_translated)
             repo.complete_story_job(job["id"], result_payload={"skipped": "output_exists"})
             return
 
