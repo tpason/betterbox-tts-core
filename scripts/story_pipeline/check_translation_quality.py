@@ -491,6 +491,7 @@ def scan_story(
             char_map=char_map_path,
             story_id=str(row.get("story_id") or story_id),
             slug=slug,
+            story_memory_dir=story_memory_dir,
             log=print,
         )
         if source_text:
@@ -813,6 +814,8 @@ def main() -> None:
     parser.add_argument("--from-chapter", type=int, default=0)
     parser.add_argument("--to-chapter", type=int, default=0)
     parser.add_argument("--char-map", default="", help="Path to char map file")
+    parser.add_argument("--story-memory-dir", default="",
+                        help="Override story memory dir (mặc định: convention story_data/story_memory/{story_id}-{slug})")
     parser.add_argument("--genre", default="", help="Override genre for checks")
     parser.add_argument("--repolish-bad", action="store_true",
                         help="Mark chapters with issues as is_polished=False so workers reprocess")
@@ -885,6 +888,7 @@ def main() -> None:
         to_ch=args.to_chapter,
         char_map_path=char_map,
         genre=genre,
+        story_memory_dir=args.story_memory_dir,
         judge_fn=judge_fn,
     )
 

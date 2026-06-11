@@ -917,6 +917,7 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
                 story_memory,
                 f"{sub_preceding}\n\n{sub}".strip(),
                 genre=genre,
+                current_chapter=int(getattr(args, "current_chapter", 0) or 0),
             )
             sub_polished = _call_polish(sub, sub_preceding, sub_smc)
             if has_editorial_noise(sub_polished) or output_too_short(sub, sub_polished, min_ratio):
