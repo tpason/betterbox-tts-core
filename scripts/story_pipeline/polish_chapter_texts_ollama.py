@@ -941,6 +941,7 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
                 story_memory,
                 f"{preceding_context}\n\n{chunk}".strip(),
                 genre=genre,
+                current_chapter=int(getattr(args, "current_chapter", 0) or 0),
             )
 
             polished: str | None = None

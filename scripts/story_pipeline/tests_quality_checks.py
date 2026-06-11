@@ -168,11 +168,63 @@ def test_llm_judge_offline() -> None:
     check("prompt yêu cầu JSON verdicts", '"verdicts"' in prompt)
 
 
+def test_recaps() -> None:
+    print("\n[story_memory recaps]")
+    import json
+    import tempfile
+    from concurrent.futures import ThreadPoolExecutor
+
+    from story_memory import (
+        StoryMemory,
+        build_recap_context,
+        build_story_memory_prompt,
+        save_chapter_recap,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        check("save recap ch1", save_chapter_recap(tmp, 1, "Enkrid gặp Shinar, xưng hô anh/cô."))
+        check("save recap ch2", save_chapter_recap(tmp, 2, "Cả đội hành quân về biên giới."))
+        check("recap rỗng → False", not save_chapter_recap(tmp, 3, "   "))
+        check("chapter <= 0 → False", not save_chapter_recap(tmp, 0, "x"))
+
+        data = json.loads((__import__("pathlib").Path(tmp) / "recaps.json").read_text())
+        check("recaps.json có 2 entries", set(data.keys()) == {"1", "2"})
+        check("entry có updated_at", bool(data["1"].get("updated_at")))
+
+        # Concurrent writes không mất entry (per-story lock + atomic replace)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(lambda n: save_chapter_recap(tmp, n, f"Recap chương {n}."), range(3, 23)))
+        data = json.loads((__import__("pathlib").Path(tmp) / "recaps.json").read_text())
+        check("concurrent: đủ 22 entries", len(data) == 22)
+
+        # Prune: max_entries giữ chương mới nhất
+        save_chapter_recap(tmp, 99, "Chương cuối.", max_entries=5)
+        data = json.loads((__import__("pathlib").Path(tmp) / "recaps.json").read_text())
+        check("prune giữ 5 chương mới nhất", set(data.keys()) == {"99", "22", "21", "20", "19"})
+
+        # build_recap_context: chỉ chương < current, theo thứ tự, giới hạn 3
+        mem = StoryMemory(recaps={
+            "5": {"recap": "Sự kiện năm."}, "6": {"recap": "Sự kiện sáu."},
+            "7": {"recap": "Sự kiện bảy."}, "9": {"recap": "Sự kiện chín (tương lai)."},
+        })
+        ctx = build_recap_context(mem, 8)
+        check("recap context có ch5-7", all(f"Chương {n}" in ctx for n in (5, 6, 7)))
+        check("không có chương >= current", "chín" not in ctx)
+        check("thứ tự thời gian (5 trước 7)", ctx.index("Chương 5") < ctx.index("Chương 7"))
+        check("current_chapter=0 → empty", build_recap_context(mem, 0) == "")
+
+        prompt = build_story_memory_prompt(mem, "văn bản", current_chapter=8)
+        check("prompt có block TÓM TẮT", "TÓM TẮT CÁC CHƯƠNG TRƯỚC" in prompt)
+        prompt0 = build_story_memory_prompt(mem, "văn bản")
+        check("không truyền current_chapter → không có recap", "TÓM TẮT" not in prompt0)
+
+
 def main() -> int:
     test_repeated_content()
     test_completeness()
     test_blocking_split_and_hints()
     test_llm_judge_offline()
+    test_recaps()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

@@ -63,6 +63,7 @@ class StoryMemory:
     glossary: list[dict[str, Any]] = field(default_factory=list)
     aliases: dict[str, str] = field(default_factory=dict)
     replacements: dict[str, str] = field(default_factory=dict)
+    recaps: dict[str, dict[str, Any]] = field(default_factory=dict)
     loaded_files: list[Path] = field(default_factory=list)
 
     @property
@@ -75,6 +76,7 @@ class StoryMemory:
             or self.glossary
             or self.aliases
             or self.replacements
+            or self.recaps
         )
 
 
@@ -347,10 +349,117 @@ def load_story_memory(
     if memory.aliases:
         memory.loaded_files.append(aliases_path)
 
+    recaps_path = base / "recaps.json"
+    recaps_data = _load_json(recaps_path)
+    if isinstance(recaps_data, dict):
+        memory.recaps = {
+            str(k): v for k, v in recaps_data.items() if isinstance(v, dict) and v.get("recap")
+        }
+        if memory.recaps:
+            memory.loaded_files.append(recaps_path)
+
     memory.replacements.update(memory.aliases)
     memory.replacements.update(_collect_character_replacements(memory.characters))
     memory.replacements.update(_collect_glossary_replacements(memory.glossary))
     return memory
+
+
+def _locked_json_update(path: Path, update_fn) -> bool:
+    """Atomic read-modify-write một JSON dict file, an toàn với nhiều worker.
+
+    - Lock per-file qua fcntl.flock trên `<path>.lock`; reload JSON mới nhất
+      TRONG lock rồi mới gọi update_fn(data) → data mới.
+    - Ghi temp file cùng dir + os.replace() (atomic trên cùng filesystem).
+    - Fail-closed: fcntl không khả dụng (hệ filesystem/OS lạ) → KHÔNG ghi,
+      trả False — caller coi như warning, tránh risk corrupt JSON.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return False
+    import os as _os
+    import tempfile as _tempfile
+
+    path = _resolve(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    try:
+        with open(lock_path, "w", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            current = _load_json(path)
+            data = current if isinstance(current, dict) else {}
+            updated = update_fn(dict(data))
+            if not isinstance(updated, dict):
+                return False
+            fd, tmp_name = _tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as tmp:
+                    json.dump(updated, tmp, ensure_ascii=False, indent=2)
+                _os.replace(tmp_name, path)
+            except BaseException:
+                try:
+                    _os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        return True
+    except OSError:
+        return False
+
+
+def save_chapter_recap(
+    directory: str | Path,
+    chapter_number: int,
+    recap: str,
+    *,
+    max_entries: int = 50,
+) -> bool:
+    """Ghi recap 1 chương vào recaps.json (atomic + locked). Giữ max_entries
+    chương gần nhất. Trả False nếu không ghi được — caller chỉ log warning."""
+    recap = (recap or "").strip()
+    if not recap or chapter_number <= 0:
+        return False
+    path = _resolve(Path(directory) / "recaps.json")
+
+    def _update(data: dict[str, Any]) -> dict[str, Any]:
+        from datetime import datetime, timezone
+        data[str(chapter_number)] = {
+            "recap": recap,
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        # Prune: giữ các chương mới nhất theo chapter number
+        def _ch(k: str) -> int:
+            try:
+                return int(k)
+            except ValueError:
+                return -1
+        keys = sorted((k for k in data if _ch(k) > 0), key=_ch, reverse=True)
+        return {k: data[k] for k in keys[:max_entries]}
+
+    return _locked_json_update(path, _update)
+
+
+def build_recap_context(memory: StoryMemory, current_chapter: int, *, max_prev: int = 3, max_chars: int = 600) -> str:
+    """Recap của <= max_prev chương liền trước current_chapter (chỉ chương nhỏ hơn —
+    an toàn với out-of-order processing). Empty nếu không có gì."""
+    if current_chapter <= 0 or not memory.recaps:
+        return ""
+    prev: list[tuple[int, str]] = []
+    for key, entry in memory.recaps.items():
+        try:
+            num = int(key)
+        except ValueError:
+            continue
+        if 0 < num < current_chapter:
+            recap = str(entry.get("recap") or "").strip()
+            if recap:
+                prev.append((num, recap))
+    if not prev:
+        return ""
+    prev.sort(reverse=True)
+    lines = [f"- Chương {num}: {recap}" for num, recap in prev[:max_prev]]
+    lines.reverse()  # in theo thứ tự thời gian
+    return _truncate("\n".join(lines), max_chars)
 
 
 def apply_story_memory_replacements(text: str, memory: StoryMemory) -> str:
@@ -516,14 +625,26 @@ def build_story_memory_prompt(
     *,
     genre: str = "",
     max_chars: int = 5200,
+    current_chapter: int = 0,
 ) -> str:
-    """Build compact story-specific prompt context for the current chunk."""
+    """Build compact story-specific prompt context for the current chunk.
+
+    current_chapter > 0 bật block recap các chương liền trước (continuity).
+    current_chapter == 0 (caller không truyền) → bỏ recaps, không đoán.
+    """
     sections: list[str] = []
 
     if memory.story_bible:
         sections.append("STORY BIBLE:\n" + _truncate(memory.story_bible, 1200))
     if memory.style_guide:
         sections.append("STYLE GUIDE:\n" + _truncate(memory.style_guide, 1200))
+
+    recap_block = build_recap_context(memory, current_chapter)
+    if recap_block:
+        sections.append(
+            "TÓM TẮT CÁC CHƯƠNG TRƯỚC (chỉ là bối cảnh để giữ mạch truyện và xưng hô — "
+            "KHÔNG dịch lại; nếu mâu thuẫn thì char map/glossary thắng):\n" + recap_block
+        )
 
     role_lines = DEFAULT_ROLE_POLICIES.get("default", [])
     if genre:

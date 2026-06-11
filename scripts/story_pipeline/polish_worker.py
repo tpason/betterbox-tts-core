@@ -34,7 +34,11 @@ from check_translation_quality import (
     issue_to_repair_hint,
     run_full_quality_check,
 )
-from story_memory import find_story_memory_quality_issues, load_story_memory
+from story_memory import (
+    find_story_memory_quality_issues,
+    load_story_memory,
+    save_chapter_recap,
+)
 from extract_term_glossary import glossary_path_for, update_term_glossary
 from llm_quality_judge import judge_chapter_quality
 
@@ -606,6 +610,68 @@ def maybe_auto_update_term_glossary(
             pass
 
 
+_RECAP_PROMPT = """/no_think
+Tóm tắt chương truyện dưới đây trong TỐI ĐA 3 câu tiếng Việt. Tập trung vào:
+nhân vật xuất hiện (và cách họ xưng hô với nhau), sự kiện chính, thuật ngữ/danh xưng mới xuất hiện.
+Chỉ trả về phần tóm tắt, không tiêu đề, không giải thích.
+
+{chapter_text}"""
+
+
+def maybe_update_chapter_recap(
+    job: dict,
+    args: argparse.Namespace,
+    *,
+    slug: str,
+    chapter_number: int,
+    polished_text: str,
+    genre: str,
+) -> None:
+    """Sinh recap <= 3 câu cho chapter vừa polish và lưu vào story memory
+    (recaps.json — atomic, per-story lock). Recap các chương trước được inject
+    vào translate/polish prompt của chương sau để giữ mạch truyện qua chương.
+
+    Never-fail: lỗi LLM/IO chỉ log warning, không fail job. --no-chapter-recap để tắt.
+    """
+    if getattr(args, "no_chapter_recap", False):
+        return
+    story_id = str(job.get("story_id") or "")
+    if not story_id or chapter_number <= 0 or not polished_text.strip():
+        return
+    try:
+        # Cùng convention dir với glossary: story_data/story_memory/{story_id}-{slug}/
+        memory_dir = glossary_path_for(story_id, slug).parent
+        # Bound prompt: đầu + cuối chương đủ cho recap 3 câu.
+        text = polished_text.strip()
+        if len(text) > 4000:
+            text = text[:2800] + "\n[...]\n" + text[-1200:]
+        payload = {
+            "model": str(getattr(args, "judge_model", "") or args.translate_model or "qwen3:14b"),
+            "messages": [{"role": "user", "content": _RECAP_PROMPT.format(chapter_text=text)}],
+            "stream": False,
+            "options": {"temperature": 0, "num_ctx": 4096},
+            "keep_alive": args.keep_alive,
+        }
+        response = requests.post(
+            f"{args.ollama_url.rstrip('/')}/api/chat", json=payload, timeout=args.timeout,
+        )
+        response.raise_for_status()
+        recap = response.json().get("message", {}).get("content", "")
+        recap = re.sub(r"<think>.*?</think>", "", recap, flags=re.DOTALL).strip()
+        # Bound recap: model lan man → cắt cứng, recap chỉ là context block.
+        if len(recap) > 500:
+            recap = recap[:500].rsplit(" ", 1)[0] + "…"
+        if not recap:
+            log(f"[RECAP] ch{chapter_number}: empty recap, skipped")
+            return
+        if save_chapter_recap(memory_dir, chapter_number, recap):
+            log(f"[RECAP] ch{chapter_number}: saved ({len(recap)} chars)")
+        else:
+            log(f"[RECAP WARN] ch{chapter_number}: cannot write recaps.json (lock/fs) — skipped")
+    except Exception as exc:  # noqa: BLE001 — recap là enhancement, không chặn pipeline
+        log(f"[RECAP WARN] ch{chapter_number}: {exc}")
+
+
 class QualityGateError(RuntimeError):
     """Raised when output still has blocking quality issues after all retries.
 
@@ -1019,6 +1085,9 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         ns = build_args(args, model, max_chars, genre, story_id=story_id, story_slug=job_slug)
         ns.char_map_file = effective_char_map
         ns.chapter_repair_hints = repair_hints
+        # Cho story memory chọn recap các chương < current (continuity qua chương).
+        # --no-chapter-recap tắt cả inject (current_chapter=0 → bỏ recap block).
+        ns.current_chapter = 0 if getattr(args, "no_chapter_recap", False) else current_chapter
         return ns
 
     if raw_language == "vi":
@@ -1218,6 +1287,15 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             genre=genre,
             args=args,
         )
+        # Rolling recap: chương sau sẽ thấy tóm tắt chương này trong prompt.
+        maybe_update_chapter_recap(
+            job,
+            args,
+            slug=job_slug,
+            chapter_number=current_chapter,
+            polished_text=polished_text_content,
+            genre=genre,
+        )
 
     repo.complete_story_job(
         job["id"],
@@ -1291,6 +1369,8 @@ def main() -> None:
                         help="Model cho LLM judge. Mặc định dùng --translate-model.")
     parser.add_argument("--no-auto-glossary", action="store_true",
                         help="Tắt auto seed/update terminology glossary (story memory).")
+    parser.add_argument("--no-chapter-recap", action="store_true",
+                        help="Tắt rolling recap (tóm tắt chương trước inject vào prompt chương sau).")
     parser.add_argument("--glossary-update-interval", type=int, default=20,
                         help="Incremental glossary update mỗi N chapters. Default: 20.")
     parser.add_argument("--prompt-profile", choices=("fast", "full"), default="full")

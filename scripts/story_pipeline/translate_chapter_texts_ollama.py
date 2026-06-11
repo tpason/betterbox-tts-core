@@ -497,6 +497,7 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
                 story_memory,
                 f"{preceding_context}\n\n{chunk}".strip(),
                 genre=genre,
+                current_chapter=int(getattr(args, "current_chapter", 0) or 0),
             )
 
             translated = ""
@@ -822,6 +823,7 @@ def single_pass_translate_polish_file(
                 story_memory,
                 f"{preceding_vi_context}\n\n{chunk}".strip(),
                 genre=genre,
+                current_chapter=int(getattr(args, "current_chapter", 0) or 0),
             )
             messages = build_single_pass_messages(
                 text=chunk,
