@@ -1,0 +1,382 @@
+[
+  {
+    "source_terms": ["Qi Refining", "Qi-Refining", "Qi Refining Realm", "Qi Refining Stage", "Qi Cultivation", "Refining Qi", "Body Refining Stage", "Luyện Khí Kỳ", "炼气期", "炼气"],
+    "canonical_vi": "Luyện Khí",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Luyện Khí Nhất Tầng / Nhị Tầng / Tam Tầng / Tứ Tầng / Ngũ Tầng / Lục Tầng / Thất Tầng / Bát Tầng / Cửu Tầng",
+    "wrong_translations": ["Luyện Khí Tầng 1", "Tầng 1 Luyện Khí", "Luyện Khí Cấp 1", "Giai Đoạn Luyện Khí", "Refining Qi"],
+    "forbidden": ["Luyện Khí Stage", "Qi Luyện"],
+    "meaning": "cảnh giới khởi đầu tu tiên — 9 tầng, dùng số Hán Việt"
+  },
+  {
+    "source_terms": ["Foundation Establishment", "Foundation Building", "Foundation Stage", "Trúc Cơ Kỳ", "筑基期", "筑基"],
+    "canonical_vi": "Trúc Cơ",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Trúc Cơ Sơ Kỳ / Trung Kỳ / Hậu Kỳ / Đỉnh Phong",
+    "wrong_translations": ["Xây Nền", "Lập Nền Móng", "Foundation Tầng", "Tầng Nền"],
+    "forbidden": ["Foundation"],
+    "meaning": "cảnh giới thứ hai — giai đoạn Sơ/Trung/Hậu Kỳ"
+  },
+  {
+    "source_terms": ["Core Formation", "Golden Core", "Jindan", "Kim Đan Kỳ", "金丹期", "金丹"],
+    "canonical_vi": "Kim Đan",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Kim Đan Sơ Kỳ / Trung Kỳ / Hậu Kỳ / Đỉnh Phong",
+    "wrong_translations": ["Lõi Vàng", "Kim Nhân", "Đan Vàng", "Core Vàng"],
+    "meaning": "cảnh giới thứ ba — tu sĩ hình thành Kim Đan trong Đan Điền"
+  },
+  {
+    "source_terms": ["Nascent Soul", "Yuanying", "Nguyên Anh Kỳ", "元婴期", "元婴"],
+    "canonical_vi": "Nguyên Anh",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Nguyên Anh Sơ Kỳ / Trung Kỳ / Hậu Kỳ / Đỉnh Phong",
+    "wrong_translations": ["Linh Hồn Sơ Sinh", "Anh Hài Nguyên Thủy", "Nascent"],
+    "meaning": "cảnh giới thứ tư — nguyên thần mang hình dạng em bé"
+  },
+  {
+    "source_terms": ["Spirit Severing", "Soul Formation", "Deity Transformation", "Spirit Transformation", "Hóa Thần Kỳ", "化神期", "化神"],
+    "canonical_vi": "Hóa Thần",
+    "kind": "realm",
+    "realm_level_format": "Hóa Thần Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Linh Hồn Đứt", "Hóa Thành Thần", "Biến Hóa"],
+    "meaning": "cảnh giới thứ năm — hướng đến thần linh"
+  },
+  {
+    "source_terms": ["Void Refinement", "Void Refining", "Luyện Hư Kỳ", "炼虚期", "炼虚"],
+    "canonical_vi": "Luyện Hư",
+    "kind": "realm",
+    "realm_level_format": "Luyện Hư Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Luyện Rỗng", "Luyện Hư Không"],
+    "meaning": "cảnh giới thứ sáu"
+  },
+  {
+    "source_terms": ["Body Integration", "Hợp Thể Kỳ", "合体期", "合体"],
+    "canonical_vi": "Hợp Thể",
+    "kind": "realm",
+    "realm_level_format": "Hợp Thể Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Hợp Nhất", "Kết Hợp Cơ Thể"],
+    "meaning": "cảnh giới thứ bảy"
+  },
+  {
+    "source_terms": ["Grand Ascension", "Mahayana", "Đại Thừa Kỳ", "大乘期", "大乘"],
+    "canonical_vi": "Đại Thừa",
+    "kind": "realm",
+    "realm_level_format": "Đại Thừa Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Thăng Thiên Lớn", "Đại Thừa"],
+    "meaning": "cảnh giới thứ tám — gần với việc vượt kiếp thăng tiên"
+  },
+  {
+    "source_terms": ["Tribulation Transcendence", "Crossing Tribulation", "Độ Kiếp Kỳ", "渡劫期", "渡劫"],
+    "canonical_vi": "Độ Kiếp",
+    "kind": "realm",
+    "realm_level_format": "Độ Kiếp Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Vượt Kiếp Nạn", "Vượt Qua Tai Kiếp"],
+    "meaning": "cảnh giới tối cao trước khi thăng tiên — phải vượt thiên kiếp"
+  },
+
+  {
+    "source_terms": ["Early Stage", "Early Phase", "Sơ Kỳ", "初期", "初阶", "初级"],
+    "canonical_vi": "Sơ Kỳ",
+    "kind": "other",
+    "wrong_translations": ["Giai Đoạn Đầu", "Cấp Thấp", "Early"],
+    "policy": "giai đoạn đầu của mỗi cảnh giới lớn (tien_hiep/kiem_hiep)"
+  },
+  {
+    "source_terms": ["Middle Stage", "Mid Stage", "Trung Kỳ", "中期", "中阶"],
+    "canonical_vi": "Trung Kỳ",
+    "kind": "other",
+    "wrong_translations": ["Giai Đoạn Giữa", "Mid"],
+    "policy": "giai đoạn giữa của mỗi cảnh giới lớn"
+  },
+  {
+    "source_terms": ["Late Stage", "Later Stage", "Hậu Kỳ", "后期", "后阶"],
+    "canonical_vi": "Hậu Kỳ",
+    "kind": "other",
+    "wrong_translations": ["Giai Đoạn Sau", "Late"],
+    "policy": "giai đoạn cuối của mỗi cảnh giới lớn"
+  },
+  {
+    "source_terms": ["Peak Stage", "Peak", "Pinnacle", "Đỉnh Phong", "巅峰"],
+    "canonical_vi": "Đỉnh Phong",
+    "kind": "other",
+    "wrong_translations": ["Đỉnh Cao", "Đỉnh", "Peak"],
+    "policy": "đỉnh của một cảnh giới — ngưỡng cửa đột phá lên cảnh giới tiếp theo"
+  },
+
+  {
+    "source_terms": ["Spirit Root", "Spiritual Root", "Spiritual Roots", "Linh Căn", "灵根"],
+    "canonical_vi": "Linh Căn",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Rễ Tinh Thần", "Gốc Linh", "Spirit Root", "Căn Linh"],
+    "meaning": "tư chất tu luyện bẩm sinh — tên chính xác cho tiên hiệp (khác Căn Cốt)"
+  },
+  {
+    "source_terms": ["Bone Structure", "Aptitude", "Natural Talent", "Root Bone", "Căn Cốt", "根骨"],
+    "canonical_vi": "Căn Cốt",
+    "kind": "other",
+    "wrong_translations": ["Tài Năng Thiên Bẩm", "Cấu Trúc Xương", "Xương Cốt"],
+    "meaning": "tư chất, thể chất bẩm sinh của tu sĩ — thường dùng cho tiên hiệp cổ đại/xianxia"
+  },
+  {
+    "source_terms": ["Dantian", "Dan Tian", "Đan Điền", "丹田"],
+    "canonical_vi": "Đan Điền",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Vùng Bụng", "Bụng Dưới", "Dantian"],
+    "meaning": "khu vực trong cơ thể tích tụ linh khí, chứa Kim Đan/Nguyên Anh"
+  },
+  {
+    "source_terms": ["Spiritual Energy", "Spirit Energy", "Spiritual Qi", "Linh Khí", "灵气", "灵力"],
+    "canonical_vi": "Linh Khí",
+    "kind": "other",
+    "wrong_translations": ["Năng Lượng Tinh Thần", "Linh Lực", "Spiritual Energy"],
+    "policy": "dùng Linh Khí cho khí lực tổng quát; Chân Khí cho khí lực đã được tu luyện"
+  },
+  {
+    "source_terms": ["True Qi", "True Energy", "Zhenqi", "Chân Khí", "真气", "真力"],
+    "canonical_vi": "Chân Khí",
+    "kind": "other",
+    "wrong_translations": ["Khí Thật", "Năng Lượng Thật", "True Energy"],
+    "meaning": "linh khí đã được tinh luyện trong cơ thể tu sĩ"
+  },
+  {
+    "source_terms": ["Cultivation Base", "Cultivation Level", "Tu Vi", "修为", "修炼基础"],
+    "canonical_vi": "Tu Vi",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Cơ Sở Tu Luyện", "Cấp Độ Tu Luyện", "Cultivation"],
+    "meaning": "mức độ tu luyện tổng thể của một tu sĩ"
+  },
+  {
+    "source_terms": ["Magic Treasure", "Spiritual Treasure", "Divine Treasure", "Pháp Bảo", "法宝", "灵宝", "神器"],
+    "canonical_vi": "Pháp Bảo",
+    "kind": "item",
+    "wrong_translations": ["Báu Vật Phép Thuật", "Bảo Vật Ma Thuật"],
+    "meaning": "vật phẩm tu tiên có linh lực, thường dùng trong chiến đấu"
+  },
+  {
+    "source_terms": ["Storage Bag", "Qiankun Bag", "Túi Trữ Vật", "储物袋", "乾坤袋"],
+    "canonical_vi": "Túi Trữ Vật",
+    "kind": "item",
+    "wrong_translations": ["Túi Không Gian", "Bag"],
+    "variants": ["Nhẫn Trữ Vật (cho storage ring)", "Vòng Trữ Vật"]
+  },
+  {
+    "source_terms": ["Storage Ring", "Space Ring", "Nhẫn Trữ Vật", "储物戒", "空间戒指"],
+    "canonical_vi": "Nhẫn Trữ Vật",
+    "kind": "item",
+    "wrong_translations": ["Nhẫn Không Gian", "Ring"]
+  },
+  {
+    "source_terms": ["Spirit Stone", "Spiritual Stone", "Linh Thạch", "灵石"],
+    "canonical_vi": "Linh Thạch",
+    "kind": "item",
+    "wrong_translations": ["Đá Linh", "Spirit Stone", "Đá Ma Thuật"],
+    "meaning": "tiền tệ và nguyên liệu tu luyện — có hạ/trung/thượng/tiên phẩm"
+  },
+  {
+    "source_terms": ["Elixir", "Spirit Pill", "Medicinal Pill", "Dan Thuốc", "Đan Dược", "丹药", "灵丹"],
+    "canonical_vi": "Đan Dược",
+    "kind": "item",
+    "wrong_translations": ["Thuốc Tiên", "Viên Thuốc Ma Thuật"],
+    "variants": ["Linh Đan", "Thần Đan"]
+  },
+  {
+    "source_terms": ["Spirit Herb", "Spirit Grass", "Lingzhi", "Linh Thảo", "Linh Dược", "灵草", "灵药"],
+    "canonical_vi": "Linh Thảo",
+    "kind": "item",
+    "wrong_translations": ["Cỏ Linh", "Thảo Dược Linh"],
+    "variants": ["Linh Dược", "Thiên Tài Địa Bảo (cho nguyên liệu quý hiếm)"]
+  },
+
+  {
+    "source_terms": ["Cultivation Art", "Cultivation Technique", "Cultivation Method", "Công Pháp", "功法", "修炼功法"],
+    "canonical_vi": "Công Pháp",
+    "kind": "technique",
+    "priority": true,
+    "wrong_translations": ["Phương Pháp Tu Luyện", "Kỹ Thuật Tu Luyện", "Cultivation Method"],
+    "meaning": "bộ pháp môn tu luyện tổng thể"
+  },
+  {
+    "source_terms": ["Secret Technique", "Forbidden Technique", "Bí Kỹ", "Bí Thuật", "秘技", "秘术", "禁术"],
+    "canonical_vi": "Bí Kỹ",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Bí Mật", "Phép Bị Cấm"],
+    "variants": ["Tuyệt Kỹ (supreme technique)", "Cấm Thuật (forbidden art)"]
+  },
+  {
+    "source_terms": ["Divine Ability", "Heavenly Ability", "Thần Thông", "神通", "天神通"],
+    "canonical_vi": "Thần Thông",
+    "kind": "technique",
+    "wrong_translations": ["Khả Năng Thần Thánh", "Kỹ Năng Trời"],
+    "meaning": "năng lực siêu nhiên hiếm gặp, thường bẩm sinh hoặc nhờ duyên phận"
+  },
+  {
+    "source_terms": ["Sword Art", "Sword Technique", "Sword Skill", "Kiếm Pháp", "剑法", "剑技"],
+    "canonical_vi": "Kiếm Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Kiếm", "Kiếm Thuật"],
+    "variants": ["Kiếm Đạo (sword dao/path)"]
+  },
+  {
+    "source_terms": ["Sword Qi", "Sword Energy", "Kiếm Khí", "剑气", "剑意"],
+    "canonical_vi": "Kiếm Khí",
+    "kind": "technique",
+    "wrong_translations": ["Năng Lượng Kiếm", "Khí Kiếm"],
+    "variants": ["Kiếm Ý (sword intent)", "Kiếm Nguyên (sword origin)"]
+  },
+  {
+    "source_terms": ["Sword Intent", "Sword Will", "Kiếm Ý", "剑意"],
+    "canonical_vi": "Kiếm Ý",
+    "kind": "technique",
+    "wrong_translations": ["Ý Định Kiếm", "Kiếm Tâm"],
+    "meaning": "ngộ đạo về kiếm — cao hơn kiếm khí"
+  },
+  {
+    "source_terms": ["Primordial Spirit", "Divine Soul", "Soul", "Nguyên Thần", "元神", "神魂"],
+    "canonical_vi": "Nguyên Thần",
+    "kind": "other",
+    "wrong_translations": ["Linh Hồn Nguyên Thủy", "Hồn Ma"],
+    "meaning": "thần thức/linh hồn của tu sĩ trong tu tiên — khác linh hồn bình thường"
+  },
+  {
+    "source_terms": ["Divine Sense", "Spiritual Sense", "Soul Sense", "Thần Thức", "神识", "灵识"],
+    "canonical_vi": "Thần Thức",
+    "kind": "other",
+    "wrong_translations": ["Nhận Thức Thần Thánh", "Giác Quan Tâm Linh"],
+    "meaning": "khả năng cảm nhận môi trường xung quanh bằng nguyên thần"
+  },
+
+  {
+    "source_terms": ["Sect", "Cultivation Sect", "Tông Môn", "宗门", "门派"],
+    "canonical_vi": "Tông Môn",
+    "kind": "organization",
+    "wrong_translations": ["Giáo Phái", "Phái", "Sect"],
+    "variants": ["Môn Phái (phong cách kiếm hiệp)"]
+  },
+  {
+    "source_terms": ["Sect Leader", "Sect Master", "Chưởng Môn", "掌门", "宗主"],
+    "canonical_vi": "Chưởng Môn",
+    "kind": "title",
+    "wrong_translations": ["Lãnh Đạo Phái", "Sect Leader", "Chủ Tông"],
+    "variants": ["Tông Chủ (cho tông lớn)"]
+  },
+  {
+    "source_terms": ["Elder", "Grand Elder", "Trưởng Lão", "长老", "太上长老"],
+    "canonical_vi": "Trưởng Lão",
+    "kind": "title",
+    "wrong_translations": ["Elder", "Già Lão", "Lão Trượng"],
+    "variants": ["Thái Thượng Trưởng Lão (Grand Elder)"]
+  },
+  {
+    "source_terms": ["Peak Master", "Hall Master", "Phong Chủ", "峰主", "殿主", "堂主"],
+    "canonical_vi": "Phong Chủ",
+    "kind": "title",
+    "wrong_translations": ["Chủ Đỉnh", "Peak Master"],
+    "variants": ["Đường Chủ (Hall Master)", "Điện Chủ"]
+  },
+  {
+    "source_terms": ["Inner Disciple", "Nội Môn Đệ Tử", "内门弟子"],
+    "canonical_vi": "Nội Môn Đệ Tử",
+    "kind": "title",
+    "wrong_translations": ["Môn Đồ Bên Trong", "Inner Disciple"]
+  },
+  {
+    "source_terms": ["Outer Disciple", "Ngoại Môn Đệ Tử", "外门弟子"],
+    "canonical_vi": "Ngoại Môn Đệ Tử",
+    "kind": "title",
+    "wrong_translations": ["Môn Đồ Bên Ngoài", "Outer Disciple"]
+  },
+  {
+    "source_terms": ["Core Disciple", "Direct Disciple", "Cốt Lõi Đệ Tử", "核心弟子", "亲传弟子"],
+    "canonical_vi": "Đệ Tử Cốt Lõi",
+    "kind": "title",
+    "wrong_translations": ["Học Trò Chính", "Core Disciple"],
+    "variants": ["Truyền Nhân Trực Tiếp (direct lineage disciple)"]
+  },
+  {
+    "source_terms": ["Immortal", "Cultivator", "Tu Sĩ", "仙人", "修仙者", "修士"],
+    "canonical_vi": "Tu Sĩ",
+    "kind": "other",
+    "wrong_translations": ["Người Tu Luyện", "Cultivator"],
+    "variants": ["Tiên Nhân (ascended immortal)", "Tán Tu (rogue cultivator — tránh 'tu sĩ lang thang')"]
+  },
+  {
+    "source_terms": ["Rogue Cultivator", "Wandering Cultivator", "Lone Cultivator", "Tán Tu", "散修"],
+    "canonical_vi": "Tán Tu",
+    "kind": "other",
+    "wrong_translations": ["Tu Sĩ Lang Thang", "Rogue Cultivator", "Tu Sĩ Cô Đơn"]
+  },
+  {
+    "source_terms": ["Heavenly Tribulation", "Lightning Tribulation", "Divine Tribulation", "Thiên Kiếp", "天劫", "雷劫"],
+    "canonical_vi": "Thiên Kiếp",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Tai Họa Từ Trời", "Sấm Sét Trừng Phạt", "Tribulation"],
+    "variants": ["Lôi Kiếp (lightning tribulation)"]
+  },
+  {
+    "source_terms": ["Realm", "Cultivation Realm", "Major Realm", "Cảnh Giới", "境界", "大境界"],
+    "canonical_vi": "Cảnh Giới",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Realm", "Cấp Độ", "Tầng Bậc"],
+    "policy": "Cảnh Giới cho bậc lớn (Luyện Khí, Trúc Cơ...); Tầng cho cấp nhỏ bên trong"
+  },
+  {
+    "source_terms": ["Breakthrough", "Advance", "Đột Phá", "突破"],
+    "canonical_vi": "Đột Phá",
+    "kind": "other",
+    "wrong_translations": ["Tiến Bộ", "Vượt Qua"],
+    "meaning": "vượt ngưỡng lên cảnh giới hoặc tầng mới"
+  },
+  {
+    "source_terms": ["Closed-Door Cultivation", "Seclusion", "Bế Quan", "闭关"],
+    "canonical_vi": "Bế Quan",
+    "kind": "other",
+    "wrong_translations": ["Đóng Cửa Luyện Tập", "Ẩn Dật"],
+    "meaning": "tu luyện cô lập không tiếp xúc bên ngoài — thường để đột phá"
+  },
+  {
+    "source_terms": ["Immortal Ascension", "Ascension", "Thăng Tiên", "Tiên Thăng", "飞升", "成仙"],
+    "canonical_vi": "Thăng Tiên",
+    "kind": "other",
+    "wrong_translations": ["Bay Lên", "Lên Tiên", "Ascension"]
+  },
+  {
+    "source_terms": ["Immortal World", "Upper Realm", "Tiên Giới", "仙界", "上界"],
+    "canonical_vi": "Tiên Giới",
+    "kind": "place",
+    "wrong_translations": ["Thế Giới Tiên", "Upper World"]
+  },
+  {
+    "source_terms": ["Mortal World", "Lower Realm", "Nhân Giới", "人界", "下界", "凡界"],
+    "canonical_vi": "Nhân Giới",
+    "kind": "place",
+    "wrong_translations": ["Thế Giới Người", "Lower World"],
+    "variants": ["Phàm Giới (mortal realm)", "Hạ Giới"]
+  },
+  {
+    "source_terms": ["Demonic Cultivator", "Devil Cultivator", "Ma Tu", "魔修", "邪修"],
+    "canonical_vi": "Ma Tu",
+    "kind": "other",
+    "wrong_translations": ["Tu Sĩ Ma Quỷ", "Demonic Cultivator"]
+  },
+  {
+    "source_terms": ["Righteous Path", "Orthodox Sect", "Chính Đạo", "正道", "正派"],
+    "canonical_vi": "Chính Đạo",
+    "kind": "other",
+    "wrong_translations": ["Con Đường Chính Nghĩa", "Orthodox"]
+  },
+  {
+    "source_terms": ["Evil Path", "Demonic Path", "Tà Đạo", "邪道", "魔道"],
+    "canonical_vi": "Tà Đạo",
+    "kind": "other",
+    "wrong_translations": ["Con Đường Xấu Xa", "Evil Path"]
+  }
+]

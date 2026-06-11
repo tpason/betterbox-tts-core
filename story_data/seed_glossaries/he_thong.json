@@ -1,0 +1,219 @@
+[
+  {
+    "source_terms": ["HP", "Health Points", "Health", "Hit Points"],
+    "canonical_vi": "HP",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN — HP là thuật ngữ game toàn cầu, không dịch",
+    "forbidden": ["Máu", "Điểm Sức Khỏe"]
+  },
+  {
+    "source_terms": ["MP", "Mana Points", "Mana", "Magic Points"],
+    "canonical_vi": "MP",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN — MP là thuật ngữ game toàn cầu, không dịch",
+    "forbidden": ["Mana", "Điểm Phép"]
+  },
+  {
+    "source_terms": ["SP", "Stamina Points", "Stamina"],
+    "canonical_vi": "SP",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN",
+    "forbidden": ["Điểm Sức Bền"]
+  },
+  {
+    "source_terms": ["EXP", "XP", "Experience Points", "Experience"],
+    "canonical_vi": "EXP",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN — EXP là thuật ngữ game phổ biến",
+    "forbidden": ["Điểm Kinh Nghiệm", "Điểm Tích Lũy"]
+  },
+  {
+    "source_terms": ["Level", "Lv", "LV", "LVL"],
+    "canonical_vi": "Cấp Độ",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Cấp Độ 1 / Cấp Độ 2 ... hoặc Level 1 / Level 2 (theo phong cách truyện)",
+    "wrong_translations": ["Lv", "LVL", "Tầng"],
+    "policy": "Dùng 'Cấp Độ N' hoặc 'Level N' — không dùng Hán Việt cho hệ thống game"
+  },
+  {
+    "source_terms": ["Stat", "Stats", "Attribute", "Attributes"],
+    "canonical_vi": "Chỉ Số",
+    "kind": "other",
+    "wrong_translations": ["Stats", "Stat", "Thuộc Tính"],
+    "variants": ["Thuộc Tính (alternate)"]
+  },
+  {
+    "source_terms": ["STR", "Strength"],
+    "canonical_vi": "STR",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN khi trong status window/UI; dịch 'Sức Mạnh' khi trong văn xuôi",
+    "variants": ["Sức Mạnh (prose context)"]
+  },
+  {
+    "source_terms": ["AGI", "Agility"],
+    "canonical_vi": "AGI",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN khi trong status window/UI; dịch 'Nhanh Nhẹn' khi trong văn xuôi",
+    "variants": ["Nhanh Nhẹn / Linh Hoạt (prose context)"]
+  },
+  {
+    "source_terms": ["INT", "Intelligence"],
+    "canonical_vi": "INT",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN khi trong status window/UI",
+    "variants": ["Trí Tuệ (prose context)"]
+  },
+  {
+    "source_terms": ["VIT", "Vitality", "CON", "Constitution"],
+    "canonical_vi": "VIT",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN khi trong status window/UI",
+    "variants": ["Sinh Lực / Thể Trạng (prose context)"]
+  },
+  {
+    "source_terms": ["DEX", "Dexterity"],
+    "canonical_vi": "DEX",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN khi trong status window/UI",
+    "variants": ["Khéo Léo (prose context)"]
+  },
+  {
+    "source_terms": ["Skill", "Active Skill", "Passive Skill"],
+    "canonical_vi": "Kỹ Năng",
+    "kind": "other",
+    "wrong_translations": ["Skill", "Chiêu Thức (nếu là game skill)"],
+    "policy": "Kỹ Năng cho game system skills; Chiêu Thức cho martial arts moves"
+  },
+  {
+    "source_terms": ["Quest", "Mission", "Task"],
+    "canonical_vi": "Nhiệm Vụ",
+    "kind": "other",
+    "wrong_translations": ["Quest", "Mission"],
+    "variants": ["Phụ Nhiệm Vụ (side quest)", "Chính Nhiệm Vụ (main quest)"]
+  },
+  {
+    "source_terms": ["Inventory", "Item Window", "Bag"],
+    "canonical_vi": "Túi Đồ",
+    "kind": "other",
+    "wrong_translations": ["Inventory", "Kho Đồ"],
+    "variants": ["Không Gian Lưu Trữ (storage space)"]
+  },
+  {
+    "source_terms": ["Status Window", "Status Screen", "Status Page"],
+    "canonical_vi": "Bảng Trạng Thái",
+    "kind": "other",
+    "wrong_translations": ["Status Window", "Cửa Sổ Trạng Thái"]
+  },
+  {
+    "source_terms": ["Notification", "Alert", "System Notification", "System Message"],
+    "canonical_vi": "Thông Báo Hệ Thống",
+    "kind": "other",
+    "wrong_translations": ["System Alert", "Notification"]
+  },
+  {
+    "source_terms": ["Buff", "Enhancement", "Boost"],
+    "canonical_vi": "Tăng Cường",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Buff"],
+    "meaning": "hiệu ứng tăng chỉ số tạm thời",
+    "forbidden_literal": ["buff"]
+  },
+  {
+    "source_terms": ["Debuff", "Weakness", "Nerf"],
+    "canonical_vi": "Làm Yếu",
+    "kind": "other",
+    "wrong_translations": ["Debuff"],
+    "variants": ["Hiệu Ứng Yếu (debuff effect)", "Giảm Chỉ Số"],
+    "forbidden_literal": ["debuff", "nerf"]
+  },
+  {
+    "source_terms": ["OP", "Overpowered"],
+    "canonical_vi": "Quá Mạnh",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["OP"],
+    "meaning": "mạnh vượt trội so với tầm cấp",
+    "forbidden_literal": ["OP", "op"]
+  },
+  {
+    "source_terms": ["Noob", "Newbie", "Beginner"],
+    "canonical_vi": "Tân Thủ",
+    "kind": "other",
+    "wrong_translations": ["Noob", "Newbie"],
+    "forbidden_literal": ["noob", "newbie"]
+  },
+  {
+    "source_terms": ["Grind", "Grinding", "Farm", "Farming"],
+    "canonical_vi": "Cày Cuốc",
+    "kind": "other",
+    "wrong_translations": ["Grind", "Farm"],
+    "meaning": "lặp đi lặp lại để tăng level/thu thập",
+    "forbidden_literal": ["grind", "farm"]
+  },
+  {
+    "source_terms": ["Loot", "Drop", "Item Drop"],
+    "canonical_vi": "Chiến Lợi Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Loot", "Drop"],
+    "variants": ["Rớt Đồ (item drop in context)"],
+    "forbidden_literal": ["loot", "drop"]
+  },
+  {
+    "source_terms": ["Boss", "Boss Monster", "Raid Boss"],
+    "canonical_vi": "Boss",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN 'Boss' — đây là loanword phổ biến trong game context Việt Nam",
+    "variants": ["Trùm (boss in non-game context)"]
+  },
+  {
+    "source_terms": ["Dungeon", "Instance", "Raid"],
+    "canonical_vi": "Dungeon",
+    "kind": "place",
+    "policy": "GIỮ NGUYÊN 'Dungeon/Raid' — đây là loanword phổ biến",
+    "variants": ["Hang Ổ (literal context)", "Bí Cảnh (cultivation dungeon variant)"]
+  },
+  {
+    "source_terms": ["Gate", "Portal", "Rift", "Dimensional Rift"],
+    "canonical_vi": "Cánh Cổng",
+    "kind": "place",
+    "wrong_translations": ["Gate", "Portal"],
+    "variants": ["Vết Nứt Không Gian (dimensional rift)", "Hư Không Liệt (void rift)"]
+  },
+  {
+    "source_terms": ["Player", "User", "Awakened", "Awakener"],
+    "canonical_vi": "Người Thức Tỉnh",
+    "kind": "other",
+    "wrong_translations": ["Player", "User"],
+    "variants": ["Thức Tỉnh Giả", "Siêu Năng Giả (powered individual)"]
+  },
+  {
+    "source_terms": ["Class", "Job", "Profession"],
+    "canonical_vi": "Lớp Nhân Vật",
+    "kind": "other",
+    "wrong_translations": ["Class", "Job"],
+    "variants": ["Nghề (short form)"]
+  },
+  {
+    "source_terms": ["Rank", "Grade", "Tier", "Rarity"],
+    "canonical_vi": "Hạng",
+    "kind": "other",
+    "wrong_translations": ["Rank", "Tier"],
+    "policy": "Hạng F/E/D/C/B/A/S (theo thứ tự tăng dần phong cách Korean LN)"
+  },
+  {
+    "source_terms": ["S-Rank", "S-Class", "S-Grade"],
+    "canonical_vi": "Hạng S",
+    "kind": "realm",
+    "wrong_translations": ["S-Rank", "S Hạng"],
+    "policy": "Dùng 'Hạng S/A/B...' — không dịch chữ cái"
+  },
+  {
+    "source_terms": ["Random", "RNG", "Lucky"],
+    "canonical_vi": "Ngẫu Nhiên",
+    "kind": "other",
+    "wrong_translations": ["Random", "RNG"],
+    "forbidden_literal": ["RNG", "rng"]
+  }
+]

@@ -68,7 +68,8 @@ out/
 *.safetensors
 
 # Generated or runtime data folders
-/story_data/
+/story_data/*
+!/story_data/seed_glossaries
 /story_audio/
 /story_audio_segments/
 /viterbox/output-profile/

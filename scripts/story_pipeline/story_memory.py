@@ -18,6 +18,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MEMORY_ROOT = ROOT / "story_data" / "story_memory"
+SEED_GLOSSARIES_ROOT = ROOT / "story_data" / "seed_glossaries"
+
+_seed_glossary_cache: dict[str, list[dict[str, Any]]] = {}
 
 
 DEFAULT_ROLE_POLICIES: dict[str, list[str]] = {
@@ -605,6 +608,7 @@ def _format_glossary_item(item: dict[str, Any]) -> str:
     if source:
         parts.append(f"source={source}")
     for key, label in (
+        ("realm_level_format", "format tầng/cấp"),
         ("meaning", "ý nghĩa"),
         ("tone", "sắc thái"),
         ("policy", "policy"),
@@ -617,6 +621,66 @@ def _format_glossary_item(item: dict[str, Any]) -> str:
         if value:
             parts.append(f"{label}={json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value}")
     return "; ".join(parts)
+
+
+def load_seed_glossary(genre: str) -> list[dict[str, Any]]:
+    """Load seed glossary for a genre from story_data/seed_glossaries/{genre}.json.
+
+    Results are cached in-process. Returns [] if file not found or genre is empty.
+    Multiple genres can be passed as comma-separated string; each file is loaded.
+    """
+    if not genre:
+        return []
+    if genre in _seed_glossary_cache:
+        return _seed_glossary_cache[genre]
+    items: list[dict[str, Any]] = []
+    for g in genre.replace(",", " ").split():
+        path = SEED_GLOSSARIES_ROOT / f"{g.strip()}.json"
+        data = _load_json(path)
+        if isinstance(data, list):
+            items.extend(item for item in data if isinstance(item, dict))
+    _seed_glossary_cache[genre] = items
+    return items
+
+
+def _relevant_seed_glossary(
+    seed_items: list[dict[str, Any]],
+    story_glossary: list[dict[str, Any]],
+    text: str,
+    max_items: int = 20,
+) -> list[dict[str, Any]]:
+    """Filter seed items relevant to text, excluding those already in story glossary."""
+    story_canonicals = {
+        _normalize_key(str(item.get("canonical_vi") or item.get("vi") or item.get("canonical") or ""))
+        for item in story_glossary
+        if item.get("canonical_vi") or item.get("vi") or item.get("canonical")
+    }
+    text_key = _normalize_key(text)
+    relevant: list[dict[str, Any]] = []
+    priority: list[dict[str, Any]] = []
+    for item in seed_items:
+        canonical = str(item.get("canonical_vi") or item.get("vi") or item.get("canonical") or "")
+        if _normalize_key(canonical) in story_canonicals:
+            continue
+        if item.get("priority"):
+            priority.append(item)
+        surfaces: list[str] = []
+        for key in ("source", "source_terms", "canonical_vi", "vi", "canonical", "variants", "wrong_translations", "forbidden", "forbidden_literal"):
+            value = item.get(key)
+            if isinstance(value, str):
+                surfaces.append(value)
+            else:
+                surfaces.extend(_string_list(value))
+        if any(_text_has_surface(text_key, surface) for surface in surfaces):
+            relevant.append(item)
+    merged: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for item in [*relevant, *priority]:
+        ident = id(item)
+        if ident not in seen:
+            seen.add(ident)
+            merged.append(item)
+    return merged[:max_items]
 
 
 def build_story_memory_prompt(
@@ -667,6 +731,15 @@ def build_story_memory_prompt(
     glossary = _relevant_glossary(memory, text)
     if glossary:
         sections.append("GLOSSARY / DANH HIỆU / THUẬT NGỮ LIÊN QUAN:\n" + "\n".join(_format_glossary_item(item) for item in glossary))
+
+    seed_items = load_seed_glossary(genre)
+    if seed_items:
+        seed_relevant = _relevant_seed_glossary(seed_items, memory.glossary, text)
+        if seed_relevant:
+            sections.append(
+                "THUẬT NGỮ THỂ LOẠI (seed — story-specific glossary thắng nếu mâu thuẫn):\n"
+                + "\n".join(_format_glossary_item(item) for item in seed_relevant)
+            )
 
     if memory.replacements:
         replacements = list(memory.replacements.items())[:40]
