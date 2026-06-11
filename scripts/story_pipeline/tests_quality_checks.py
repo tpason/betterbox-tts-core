@@ -119,10 +119,60 @@ def test_blocking_split_and_hints() -> None:
     )
 
 
+def test_llm_judge_offline() -> None:
+    print("\n[llm_quality_judge — offline]")
+    from llm_quality_judge import (
+        JudgeResult,
+        _parse_judge_json,
+        _rotating_offsets,
+        build_judge_prompt,
+    )
+
+    # JSON parsing robustness
+    plain = '{"verdicts": [{"issue": "word_for_word", "severity": "major", "evidence": "x", "window": 1}]}'
+    check("plain JSON parse", _parse_judge_json(plain)[0]["issue"] == "word_for_word")
+    fenced = f"```json\n{plain}\n```"
+    check("markdown fence parse", _parse_judge_json(fenced)[0]["issue"] == "word_for_word")
+    noisy = f"Đây là kết quả:\n{plain}\nHết."
+    check("text thừa quanh JSON parse", _parse_judge_json(noisy)[0]["issue"] == "word_for_word")
+    try:
+        _parse_judge_json("không có json")
+        check("no JSON → raise", False)
+    except ValueError:
+        check("no JSON → raise", True)
+
+    # JudgeResult mapping: chỉ major thành issues; minor + error thành warnings
+    r = JudgeResult(verdicts=[
+        {"issue": "word_for_word", "severity": "major"},
+        {"issue": "unnatural", "severity": "minor"},
+        {"issue": "không_hợp_lệ", "severity": "major"},
+    ])
+    check("major → judge:word_for_word", r.issues == ["judge:word_for_word"])
+    check("minor → judge_minor:unnatural", r.warnings == ["judge_minor:unnatural"])
+    check("issue lạ bị bỏ qua", all("không_hợp_lệ" not in i for i in r.issues + r.warnings))
+    check("error → judge_error warning", "judge_error:Timeout" in JudgeResult(error="Timeout").warnings)
+
+    # Rotating windows: deterministic theo seed+attempt, đổi khi attempt đổi
+    o1 = _rotating_offsets(3, "ch1", 0)
+    o2 = _rotating_offsets(3, "ch1", 0)
+    o3 = _rotating_offsets(3, "ch1", 1)
+    check("offsets deterministic", o1 == o2)
+    check("offsets rotate theo attempt", o1 != o3)
+    check("offsets trong [0,1)", all(0 <= o < 1 for o in o1))
+
+    src = "The knight walked. " * 200
+    out = "Hiệp sĩ bước đi. " * 200
+    prompt = build_judge_prompt(src, out, seed="ch1", n_windows=3, window_chars=300)
+    check("prompt có 3 cặp window", prompt.count("=== CẶP") == 3)
+    check("prompt có /no_think", prompt.startswith("/no_think"))
+    check("prompt yêu cầu JSON verdicts", '"verdicts"' in prompt)
+
+
 def main() -> int:
     test_repeated_content()
     test_completeness()
     test_blocking_split_and_hints()
+    test_llm_judge_offline()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

@@ -485,6 +485,11 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
     translated_chunks: list[str] = []
     preceding_context = ""
     max_quality_retries = getattr(args, "max_quality_retries", 2)
+    # Chapter-level repair hints từ quality gate (re-run sau khi gate fail) —
+    # seed vào mọi chunk để lần dịch lại có chỉ dẫn sửa cụ thể.
+    chapter_hints = str(getattr(args, "chapter_repair_hints", "") or "")
+    if chapter_hints:
+        print(f"[REPAIR] chapter-level hints active:\n{chapter_hints}")
     with requests.Session() as session:
         for idx, chunk in enumerate(chunks, start=1):
             print(f"[{idx}/{len(chunks)}] Translate {len(chunk)} chars with {args.model}" + (f" +ctx={len(preceding_context)}c" if preceding_context else ""))
@@ -495,7 +500,7 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
             )
 
             translated = ""
-            repair_hints_for_chunk = ""
+            repair_hints_for_chunk = chapter_hints
             for q_attempt in range(max_quality_retries + 1):
                 translated = call_ollama(
                     base_url=args.ollama_url,
@@ -533,7 +538,8 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
                             print(f"[QUALITY_FAIL] translate chunk {idx}/{len(chunks)}: {blocking} (gave up after {max_quality_retries} retries)")
                         else:
                             print(f"[QUALITY_RETRY] translate chunk {idx}/{len(chunks)} attempt {q_attempt + 1}: {blocking}")
-                            repair_hints_for_chunk = "\n".join(f"- {_trans_repair_hint(i)}" for i in blocking)
+                            chunk_hints = "\n".join(f"- {_trans_repair_hint(i)}" for i in blocking)
+                            repair_hints_for_chunk = "\n".join(filter(None, [chapter_hints, chunk_hints]))
                             continue
                 break
 
@@ -627,6 +633,7 @@ def build_single_pass_messages(
     preceding_vi_context: str = "",
     story_memory_context: str = "",
     no_think: bool = True,
+    repair_hints: str = "",
 ) -> list[dict[str, str]]:
     focused_char_map = filter_char_map_for_text(
         char_map,
@@ -641,6 +648,11 @@ def build_single_pass_messages(
             "══════ STORY MEMORY / ROLE BIBLE / GLOSSARY (HIGHEST PRIORITY) ══════\n"
             "Story-specific rules — override all general rules if there is a conflict:\n"
             f"{story_memory_context}"
+        )
+    if repair_hints:
+        system += (
+            "\n\n══════ SỬA LỖI TỪ LẦN DỊCH TRƯỚC (BẮT BUỘC) ══════\n"
+            f"{repair_hints}"
         )
     if preceding_vi_context:
         user_content = (
@@ -818,6 +830,7 @@ def single_pass_translate_polish_file(
                 preceding_vi_context=preceding_vi_context,
                 story_memory_context=story_memory_context,
                 no_think=True,
+                repair_hints=str(getattr(args, "chapter_repair_hints", "") or ""),
             )
             payload_data: dict[str, Any] = {
                 "model": args.model,

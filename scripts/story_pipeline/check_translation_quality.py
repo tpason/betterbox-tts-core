@@ -130,6 +130,17 @@ def issue_to_repair_hint(issue: str) -> str:
     if base == "structure_drift":
         return ("Số đoạn văn/dòng thoại lệch mạnh so với bản gốc — giữ nguyên cấu trúc đoạn "
                 "và đầy đủ các câu thoại của bản gốc.")
+    if base == "judge":
+        sub = issue.split(":", 1)[1].strip() if ":" in issue else ""
+        judge_hints = {
+            "word_for_word": ("Bản dịch bám từng chữ nguồn — viết lại thành câu tiếng Việt "
+                              "tự nhiên, đúng nghĩa, không giữ cú pháp ngôn ngữ nguồn."),
+            "omission": "Có câu/ý trong nguyên bản bị bỏ sót — dịch đầy đủ mọi câu, không tóm tắt.",
+            "mistranslation": "Có chỗ dịch sai nghĩa so với nguyên bản — dịch lại đúng nghĩa trong ngữ cảnh.",
+            "wrong_pronoun": "Xưng hô/đại từ sai hoặc bất nhất — thống nhất theo char map.",
+            "unnatural": "Câu văn lủng củng, không tự nhiên — viết lại mượt mà để đọc audio.",
+        }
+        return judge_hints.get(sub, f"Lỗi chất lượng (LLM judge): {sub or issue}")
     return f"Lỗi chất lượng: {issue}"
 
 
@@ -452,6 +463,7 @@ def scan_story(
     char_map_path: str = "",
     genre: str = "",
     story_memory_dir: str = "",
+    judge_fn: Callable[[str, str, str], Any] | None = None,
 ) -> list[dict]:
     """Scan polished chapters, return list of {chapter_number, issues, blocking, warnings}.
 
@@ -488,6 +500,12 @@ def scan_story(
             warnings.extend(check_completeness(text, source_text, raw_language))
         else:
             warnings.append("source_unavailable")
+        # LLM judge (optional): sampled semantic QA — kết quả là warnings trong
+        # scanner (act qua --issue-filter judge: nếu muốn retranslate).
+        if judge_fn and source_text:
+            result = judge_fn(source_text, text, str(row.get("chapter_id") or ""))
+            warnings.extend(result.issues)
+            warnings.extend(result.warnings)
         if blocking or warnings:
             results.append({
                 "chapter_number": row["chapter_number"],
@@ -810,6 +828,12 @@ def main() -> None:
                         help="Also reset currently-running jobs (risk of race; use only when workers are stopped)")
     parser.add_argument("--min-issues", type=int, default=1,
                         help="Min number of issues to flag a chapter (default: 1)")
+    parser.add_argument("--llm-judge", action="store_true",
+                        help="Chạy LLM judge (sampled semantic QA) trên mỗi chapter — chậm, "
+                             "+1 Ollama call/chapter. Kết quả là warnings (judge:*) — kết hợp "
+                             "--issue-filter judge: nếu muốn act.")
+    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    parser.add_argument("--judge-model", default="qwen3:14b")
     args = parser.parse_args()
 
     # Auto-find char map if not specified
@@ -843,12 +867,23 @@ def main() -> None:
 
     print(f"[SCAN] story={args.story_id} genre={genre!r} char_map={'yes' if char_map else 'no'}")
 
+    judge_fn = None
+    if args.llm_judge:
+        from llm_quality_judge import judge_chapter_quality
+
+        def judge_fn(src: str, out: str, chapter_id: str):
+            return judge_chapter_quality(
+                src, out, genre=genre, ollama_url=args.ollama_url,
+                model=args.judge_model, seed=chapter_id,
+            )
+
     bad = scan_story(
         args.story_id,
         from_ch=args.from_chapter,
         to_ch=args.to_chapter,
         char_map_path=char_map,
         genre=genre,
+        judge_fn=judge_fn,
     )
 
     bad = [r for r in bad if len(r["issues"]) >= args.min_issues]

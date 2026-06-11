@@ -36,6 +36,7 @@ from check_translation_quality import (
 )
 from story_memory import find_story_memory_quality_issues, load_story_memory
 from extract_term_glossary import glossary_path_for, update_term_glossary
+from llm_quality_judge import judge_chapter_quality
 
 
 def story_slug_for_job(job: dict, input_path: Path) -> str:
@@ -690,36 +691,70 @@ def _gated_pass(
 
     - mode=block (default): re-run toàn bộ pass khi còn blocking issues
       (tối đa --chapter-quality-retries lần); hết retry → QualityGateError,
-      caller KHÔNG ghi DB.
+      caller KHÔNG ghi DB. Mỗi lần re-run nhận repair hints cụ thể từ các
+      blocking issues của lần trước (run_pass(repair_hints)).
     - mode=warn: check + log nhưng vẫn trả text (hành vi cũ).
-    - mode=off: không check.
+    - mode=off: không check deterministic (judge vẫn chạy nếu bật).
+
+    Stage 2 — LLM judge (--llm-judge off|warn|block, default warn): sampled
+    semantic QA, chỉ chạy khi deterministic checks pass. judge=block chỉ có
+    tác dụng re-run khi quality_gate=block (dùng chung retry budget).
 
     Chunk-level retry với repair hints vẫn chạy bên trong run_pass như cũ;
     gate này bắt các lỗi sống sót qua chunk retry (cross-chunk, glossary drift).
     """
     mode = str(getattr(args, "quality_gate", "block") or "block").lower()
+    judge_mode = str(getattr(args, "llm_judge", "warn") or "warn").lower()
     retries = max(0, int(getattr(args, "chapter_quality_retries", 1)))
     attempts = (retries + 1) if mode == "block" else 1
     text = ""
     blocking: list[str] = []
+    repair_hints = ""
     for attempt in range(1, attempts + 1):
-        run_pass()
+        run_pass(repair_hints)
         text = read_output()
-        if mode == "off":
+        if mode == "off" and judge_mode == "off":
             return text
-        blocking, _ = _quality_check(
-            text,
-            genre,
-            char_map,
-            label,
-            story_id=story_id,
-            slug=slug,
-            story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
-            source_text=source_text,
-            source_language=source_language,
-        )
+        if mode == "off":
+            blocking = []
+        else:
+            blocking, _ = _quality_check(
+                text,
+                genre,
+                char_map,
+                label,
+                story_id=story_id,
+                slug=slug,
+                story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+                source_text=source_text,
+                source_language=source_language,
+            )
+
+        # Stage 2: LLM judge — chỉ khi deterministic pass, tránh tốn call vô ích.
+        if not blocking and judge_mode != "off" and source_text:
+            judge = judge_chapter_quality(
+                source_text,
+                text,
+                genre=genre,
+                ollama_url=args.ollama_url,
+                model=str(getattr(args, "judge_model", "") or args.translate_model or "qwen3:14b"),
+                num_ctx=int(getattr(args, "num_ctx", 8192) or 8192),
+                timeout=int(getattr(args, "timeout", 600) or 600),
+                seed=label,
+                attempt=attempt - 1,
+            )
+            if judge.warnings:
+                log(f"[JUDGE_WARN] {label}: {', '.join(judge.warnings)}")
+            if judge.issues:
+                if judge_mode == "block":
+                    blocking = list(judge.issues)
+                    log(f"[JUDGE_FAIL] {label}: {', '.join(judge.issues)}")
+                else:
+                    log(f"[JUDGE_WARN] {label} (major, warn-only): {', '.join(judge.issues)}")
+
         if not blocking or mode != "block":
             return text
+        repair_hints = "\n".join(f"- {issue_to_repair_hint(i)}" for i in blocking)
         if attempt < attempts:
             log(f"[QUALITY_GATE] {label}: re-run {attempt}/{retries} — {', '.join(blocking)}")
     # Xóa output hỏng trên disk — nếu để lại, lần retry job sau sẽ dính nhánh
@@ -978,9 +1013,12 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             repo.complete_story_job(job["id"], result_payload={"skipped": "output_exists"})
             return
 
-    def _build_args_with_char_map(model: str, max_chars: int, genre: str = "") -> Namespace:
+    def _build_args_with_char_map(
+        model: str, max_chars: int, genre: str = "", repair_hints: str = ""
+    ) -> Namespace:
         ns = build_args(args, model, max_chars, genre, story_id=story_id, story_slug=job_slug)
         ns.char_map_file = effective_char_map
+        ns.chapter_repair_hints = repair_hints
         return ns
 
     if raw_language == "vi":
@@ -988,10 +1026,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         max_chars = int(payload.get("polish_max_chars_per_chunk") or args.polish_max_chars_per_chunk)
         _check_resources(args, label="polish")
         polished_text_content = _gated_pass(
-            lambda: polish_file(
+            lambda hints: polish_file(
                 input_path,
                 output_path,
-                _build_args_with_char_map(model, max_chars, genre),
+                _build_args_with_char_map(model, max_chars, genre, hints),
             ),
             lambda: _fix_pronouns_for_genre(
                 read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
@@ -1016,10 +1054,14 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         single_pass_max_chars = int(payload.get("translate_max_chars_per_chunk") or args.single_pass_max_chars_per_chunk)
         translate_model = job.get("model") or args.translate_model
         _check_resources(args, label="translate")
-        sp_args = _build_args_with_char_map(translate_model, single_pass_max_chars, genre)
-        sp_args.num_ctx = args.single_pass_num_ctx
+
+        def _single_pass_run(hints: str) -> None:
+            sp_args = _build_args_with_char_map(translate_model, single_pass_max_chars, genre, hints)
+            sp_args.num_ctx = args.single_pass_num_ctx
+            single_pass_translate_polish_file(input_path, output_path, sp_args)
+
         polished_text_content = _gated_pass(
-            lambda: single_pass_translate_polish_file(input_path, output_path, sp_args),
+            _single_pass_run,
             lambda: _fix_pronouns_for_genre(
                 read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
             ),
@@ -1070,10 +1112,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         # fail sớm, không tốn polish pass. DB write của translated DỜI xuống sau
         # khi polished cũng pass gate — chapter fail không ghi gì vào DB.
         translated_text_content = _gated_pass(
-            lambda: translate_file(
+            lambda hints: translate_file(
                 input_path,
                 translated_path,
-                _build_args_with_char_map(translate_model, translate_max_chars, genre),
+                _build_args_with_char_map(translate_model, translate_max_chars, genre, hints),
             ),
             lambda: _fix_pronouns_for_genre(
                 read_formatted_output(translated_path, job, write_back=True, label="translated"),
@@ -1105,7 +1147,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         genre = resolve_genre(job, effective_char_map)
         mode = post_translate_mode(job, args)
         if mode == "copy":
-            def _copy_pass() -> None:
+            def _copy_pass(_hints: str = "") -> None:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_text(clean_for_audiobook_tts(translated_text_content).strip() + "\n", encoding="utf-8")
                 log(f"[COPY] translated output reused as polished output: {output_path}")
@@ -1134,10 +1176,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 unload_ollama_model(args.ollama_url, translate_model)
             _check_resources(args, label="polish", unloaded_model=translate_model if translate_model != args.vi_model else "")
             polished_text_content = _gated_pass(
-                lambda: polish_file(
+                lambda hints: polish_file(
                     translated_path,
                     output_path,
-                    _build_args_with_char_map(args.vi_model, polish_max_chars, genre),
+                    _build_args_with_char_map(args.vi_model, polish_max_chars, genre, hints),
                 ),
                 lambda: _fix_pronouns_for_genre(
                     read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
@@ -1241,6 +1283,12 @@ def main() -> None:
                         help="Chapter-level quality gate trước khi ghi DB. block: còn blocking issues sau retries → fail job, KHÔNG ghi DB (default). warn: chỉ log, vẫn ghi (hành vi cũ). off: không check.")
     parser.add_argument("--chapter-quality-retries", type=int, default=1,
                         help="Số lần re-run TOÀN BỘ pass (translate/polish) khi chapter fail quality gate. Default: 1.")
+    parser.add_argument("--llm-judge", choices=("off", "warn", "block"), default="warn",
+                        help="LLM judge (sampled semantic QA) sau khi deterministic checks pass. "
+                             "warn: log major issues, vẫn ghi DB (default — đang calibrate). "
+                             "block: re-run pass với repair hints, chỉ có tác dụng khi --quality-gate block. off: tắt.")
+    parser.add_argument("--judge-model", default="",
+                        help="Model cho LLM judge. Mặc định dùng --translate-model.")
     parser.add_argument("--no-auto-glossary", action="store_true",
                         help="Tắt auto seed/update terminology glossary (story memory).")
     parser.add_argument("--glossary-update-interval", type=int, default=20,

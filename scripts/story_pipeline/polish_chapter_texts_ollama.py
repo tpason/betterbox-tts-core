@@ -928,6 +928,10 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
         return "\n\n".join(parts)
 
     max_quality_retries = getattr(args, "max_quality_retries", 2)
+    # Chapter-level repair hints từ quality gate (re-run sau khi gate fail).
+    chapter_hints = str(getattr(args, "chapter_repair_hints", "") or "")
+    if chapter_hints:
+        print(f"[REPAIR] chapter-level hints active:\n{chapter_hints}")
     polished_chunks: list[str] = []
     preceding_context = ""
     with requests.Session() as session:
@@ -940,7 +944,7 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
             )
 
             polished: str | None = None
-            repair_hints_for_chunk = ""
+            repair_hints_for_chunk = chapter_hints
             for q_attempt in range(max_quality_retries + 1):
                 attempt = _call_polish(chunk, preceding_context, story_memory_context, repair_hints=repair_hints_for_chunk)
 
@@ -963,7 +967,8 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
                             print(f"[QUALITY_FAIL] chunk {idx}/{len(chunks)}: {blocking} (gave up after {max_quality_retries} retries)")
                         else:
                             print(f"[QUALITY_RETRY] chunk {idx}/{len(chunks)} attempt {q_attempt + 1}: {blocking}")
-                            repair_hints_for_chunk = "\n".join(f"- {issue_to_repair_hint(i)}" for i in blocking)
+                            chunk_hints = "\n".join(f"- {issue_to_repair_hint(i)}" for i in blocking)
+                            repair_hints_for_chunk = "\n".join(filter(None, [chapter_hints, chunk_hints]))
                             continue
 
                 polished = attempt
