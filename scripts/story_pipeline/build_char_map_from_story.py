@@ -939,6 +939,8 @@ def main() -> None:
         help="Chỉ chạy Pass 1 (local scan), in candidates, không gọi LLM.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Pass 1 only + in kết quả.")
+    parser.add_argument("--validate", action="store_true",
+                        help="Chỉ validate char map hiện có (alias/pronoun/genre conflicts) rồi thoát.")
 
     args = parser.parse_args()
 
@@ -984,6 +986,20 @@ def main() -> None:
         existing_content = out_path.read_text(encoding="utf-8")
         existing_chars = parse_existing_char_map(existing_content)
         print(f"[EXIST] {out_path} — {len(existing_chars)} nhân vật đã có")
+
+    if args.validate:
+        from genre_prompts import validate_char_map
+        if not existing_content:
+            print(f"[VALIDATE] Không có char map tại {out_path}")
+            return
+        issues = validate_char_map(existing_content)
+        if not issues:
+            print(f"[VALIDATE] OK — không phát hiện issue nào ({out_path})")
+        else:
+            print(f"[VALIDATE] {len(issues)} issue(s) trong {out_path}:")
+            for issue in issues:
+                print(f"  - {issue}")
+        return
 
     # ── Pass 1 ────────────────────────────────────────────────────────────────
     candidates = pass1_scan(rows, text_source=text_source, min_frequency=args.min_frequency)

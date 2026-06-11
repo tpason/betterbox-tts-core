@@ -527,6 +527,75 @@ def infer_genre_from_char_map(char_map: str) -> str:
     return ""
 
 
+# Genres cấm hắn/nàng/lão/y trong văn kể — đồng bộ với
+# check_translation_quality._WRONG_PRONOUN_GENRES (giữ bản sao local để tránh
+# circular import).
+_NARRATIVE_PRONOUN_FORBIDDEN_GENRES = {
+    GENRE_WESTERN_FANTASY, GENRE_DO_THI, GENRE_LANG_MAN, GENRE_KOREAN_CULTIVATION,
+}
+_FORBIDDEN_NARRATIVE_PRONOUNS = {"hắn", "nàng", "lão", "y"}
+
+
+def validate_char_map(char_map_text: str) -> list[str]:
+    """Validate char map content — trả list issue strings (empty = OK).
+
+    Checks:
+      - entry_missing_pronoun: entry nhân vật thiếu 'Ngôi thứ ba'
+      - alias_target_unknown: alias trỏ tới tên không có entry / không là 'Tên khác'
+      - alias_shadows_entry: alias LHS trùng tên một entry (entry sẽ bị rename)
+      - entry_pronoun_genre_conflict: genre cấm đại từ cổ phong nhưng entry dùng
+
+    Tất cả là warnings — caller log, không chặn pipeline.
+    """
+    issues: list[str] = []
+    if not (char_map_text or "").strip():
+        return issues
+
+    # Parse entries: '### Name' + '- Key: value' fields
+    entries: dict[str, dict[str, str]] = {}
+    current = ""
+    for line in char_map_text.splitlines():
+        if line.startswith("### "):
+            current = line[4:].strip()
+            if current:
+                entries.setdefault(current, {})
+        elif current and line.strip().startswith("- ") and ":" in line:
+            key, _, value = line.strip()[2:].partition(":")
+            entries[current][key.strip().lower()] = value.strip()
+
+    # Known surfaces = entry names + 'Tên khác' values (lowercase)
+    known: set[str] = {name.lower() for name in entries}
+    for fields in entries.values():
+        for alt in fields.get("tên khác", "").split(","):
+            alt = alt.strip().lower()
+            if alt:
+                known.add(alt)
+
+    aliases = parse_aliases(char_map_text)
+    for wrong_lower, correct in aliases.items():
+        if correct.lower() not in known:
+            issues.append(f"alias_target_unknown:{wrong_lower} -> {correct}")
+        if wrong_lower in {name.lower() for name in entries} and wrong_lower != correct.lower():
+            issues.append(f"alias_shadows_entry:{wrong_lower} -> {correct}")
+
+    genre = infer_genre_from_char_map(char_map_text)
+    forbid_pronouns = genre in _NARRATIVE_PRONOUN_FORBIDDEN_GENRES
+    for name, fields in entries.items():
+        pronoun = fields.get("ngôi thứ ba", "").strip()
+        if not pronoun:
+            issues.append(f"entry_missing_pronoun:{name}")
+            continue
+        if forbid_pronouns:
+            pronoun_words = {w.strip().lower() for w in re.split(r"[,/;]", pronoun)}
+            bad = pronoun_words & _FORBIDDEN_NARRATIVE_PRONOUNS
+            if bad:
+                issues.append(
+                    f"entry_pronoun_genre_conflict:{name}:{'/'.join(sorted(bad))} (genre={genre})"
+                )
+
+    return issues
+
+
 SOURCE_NOISE_PATTERNS = [
     r"(?is)\s*www\.\s*ko-fi\.\s*com/\S+.*$",
     r"(?is)\s*ko-fi\.\s*com/\S+.*$",

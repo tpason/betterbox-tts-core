@@ -21,7 +21,14 @@ if str(ROOT) not in sys.path:
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 from story_db.story_pipeline_db import repository as repo
-from genre_prompts import clean_source_noise, detect_genre, find_char_map_file, resolve_genre_from_context
+from genre_prompts import (
+    clean_source_noise,
+    detect_genre,
+    find_char_map_file,
+    load_char_map,
+    resolve_genre_from_context,
+    validate_char_map,
+)
 from extract_char_map import update_char_map_incremental
 from polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from reader_content_format import format_polished_content as format_reader_polished_content
@@ -1013,6 +1020,14 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         )
     if effective_char_map:
         log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
+        try:
+            cm_issues = validate_char_map(load_char_map(effective_char_map, story_id))
+            if cm_issues:
+                shown = ", ".join(cm_issues[:8])
+                more = f" (+{len(cm_issues) - 8} more)" if len(cm_issues) > 8 else ""
+                log(f"[CHARMAP_WARN] {len(cm_issues)} issue(s): {shown}{more}")
+        except Exception as exc:  # noqa: BLE001 — validation chỉ là cảnh báo
+            log(f"[CHARMAP_WARN] validate error: {exc}")
 
     # Lookahead: pre-extract raw characters N chapters ahead so the char-map is
     # already populated when those chapters are translated (sliding window, 1 new

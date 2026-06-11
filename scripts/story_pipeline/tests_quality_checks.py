@@ -219,12 +219,70 @@ def test_recaps() -> None:
         check("không truyền current_chapter → không có recap", "TÓM TẮT" not in prompt0)
 
 
+def test_validate_char_map() -> None:
+    print("\n[validate_char_map]")
+    from genre_prompts import validate_char_map
+
+    good_map = """## Thể loại: Tu tiên Hàn Quốc (korean cultivation)
+
+[ALIASES]
+Eun-hyun = Seo Eun-Hyun
+
+### Seo Eun-Hyun
+- Tên khác: Deputy Manager Seo
+- Ngôi thứ ba: anh ta
+- Tự xưng: tôi
+"""
+    check("map sạch → []", validate_char_map(good_map) == [])
+    check("empty map → []", validate_char_map("") == [])
+
+    bad_map = """## Thể loại: Tu tiên Hàn Quốc (korean cultivation)
+
+[ALIASES]
+Eun-hyun = Seo Eun-Hyun
+Ai Đó = Người Không Tồn Tại
+Kim Yeon = Kim Young-hoon
+
+### Seo Eun-Hyun
+- Ngôi thứ ba: hắn
+- Tự xưng: ta
+
+### Kim Yeon
+- Ngôi thứ ba: cô ta
+
+### Nhân Vật Thiếu Pronoun
+- Tự xưng: tôi
+
+### Kim Young-hoon
+- Ngôi thứ ba: anh ta
+"""
+    issues = validate_char_map(bad_map)
+    check("alias target lạ → alias_target_unknown",
+          any(i.startswith("alias_target_unknown:ai đó") for i in issues))
+    check("alias LHS trùng entry → alias_shadows_entry",
+          any(i.startswith("alias_shadows_entry:kim yeon") for i in issues))
+    check("entry thiếu pronoun → entry_missing_pronoun",
+          any(i == "entry_missing_pronoun:Nhân Vật Thiếu Pronoun" for i in issues))
+    check("genre korean_cultivation + 'hắn' → conflict",
+          any(i.startswith("entry_pronoun_genre_conflict:Seo Eun-Hyun:hắn") for i in issues))
+    check("'cô ta' không bị flag", all("Kim Yeon:" not in i for i in issues if "conflict" in i))
+
+    # Genre tiên hiệp: hắn hợp lệ
+    tienhiep_map = """## Thể loại: tiên hiệp
+
+### Lý Mộ Trần
+- Ngôi thứ ba: hắn
+"""
+    check("tiên hiệp + 'hắn' → OK", validate_char_map(tienhiep_map) == [])
+
+
 def main() -> int:
     test_repeated_content()
     test_completeness()
     test_blocking_split_and_hints()
     test_llm_judge_offline()
     test_recaps()
+    test_validate_char_map()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
