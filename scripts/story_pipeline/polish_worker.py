@@ -1091,6 +1091,16 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                     job,
                     read_formatted_output(Path(translated_path), job, write_back=False, label="translated"),
                 )
+            # Codex finding 3: nếu recap chưa có (worker crash sau write text nhưng trước recap),
+            # backfill từ existing_polished trước khi complete job.
+            maybe_update_chapter_recap(
+                job,
+                args,
+                slug=job_slug,
+                chapter_number=current_chapter,
+                polished_text=existing_polished,
+                genre=genre,
+            )
             repo.complete_story_job(job["id"], result_payload={"skipped": "output_exists"})
             return
 
