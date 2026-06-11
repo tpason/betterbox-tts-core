@@ -475,16 +475,52 @@ def genre_header_line(genre: str) -> str:
     return _GENRE_HEADER_LINES.get(genre, "")
 
 
+def get_seed_realm_format_hints(genre: str) -> str:
+    """Return compact realm format rules from seed glossary for injection into system prompt.
+
+    These are static per genre and suitable for caching in system prompt between chapters.
+    Returns empty string if no realm items found or no seed file for this genre.
+    """
+    try:
+        from story_memory import load_seed_glossary
+    except ImportError:
+        return ""
+    items = load_seed_glossary(genre)
+    if not items:
+        return ""
+    lines: list[str] = []
+    for item in items:
+        fmt = item.get("realm_level_format")
+        if not fmt:
+            continue
+        canonical = item.get("canonical_vi") or item.get("canonical") or ""
+        wrong = item.get("wrong_translations") or []
+        wrong_str = f"; KHÔNG: {'/'.join(str(w) for w in wrong[:3])}" if wrong else ""
+        lines.append(f"  {canonical}: {fmt}{wrong_str}")
+    if not lines:
+        return ""
+    return "Quy tắc cảnh giới/cấp độ (bắt buộc):\n" + "\n".join(lines)
+
+
 def get_polish_genre_addendum(genre: str) -> str:
     """Return genre-specific text to append to polish system prompt. Empty → no change."""
-    return _POLISH_GENRE_ADDENDUM.get(genre, "").strip()
+    base = _POLISH_GENRE_ADDENDUM.get(genre, "").strip()
+    realm_hints = get_seed_realm_format_hints(genre)
+    if realm_hints:
+        return f"{base}\n{realm_hints}".strip() if base else realm_hints
+    return base
 
 
 def get_translate_genre_addendum(genre: str, *, for_english_model: bool = False) -> str:
     """Return genre-specific text to append to translate system prompt."""
     if for_english_model:
-        return _TRANSLATE_GENRE_ADDENDUM_EN.get(genre, "").strip()
-    return _TRANSLATE_GENRE_ADDENDUM.get(genre, "").strip()
+        base = _TRANSLATE_GENRE_ADDENDUM_EN.get(genre, "").strip()
+    else:
+        base = _TRANSLATE_GENRE_ADDENDUM.get(genre, "").strip()
+    realm_hints = get_seed_realm_format_hints(genre)
+    if realm_hints:
+        return f"{base}\n{realm_hints}".strip() if base else realm_hints
+    return base
 
 
 def infer_genre_from_char_map(char_map: str) -> str:

@@ -298,6 +298,27 @@ def _collect_glossary_replacements(glossary: list[dict[str, Any]]) -> dict[str, 
     return replacements
 
 
+def seed_glossary_replacements(genre: str) -> dict[str, str]:
+    """Return wrong_translations and forbidden_literal from seed glossary as a replacements dict.
+
+    Used as a deterministic fallback: even if the LLM ignores the seed context,
+    these known-bad strings get normalized post-hoc. Story-specific replacements take priority.
+    Only includes items with priority=True to avoid over-aggressive normalization.
+    """
+    replacements: dict[str, str] = {}
+    for item in load_seed_glossary(genre):
+        if not item.get("priority"):
+            continue
+        canonical = str(item.get("canonical_vi") or item.get("vi") or item.get("canonical") or "").strip()
+        if not canonical:
+            continue
+        for key in ("wrong_translations", "forbidden_literal"):
+            for surface in _string_list(item.get(key)):
+                if surface and surface not in replacements:
+                    replacements[surface] = canonical
+    return replacements
+
+
 def load_story_memory(
     *,
     story_memory_dir: str = "",
@@ -643,11 +664,36 @@ def load_seed_glossary(genre: str) -> list[dict[str, Any]]:
     return items
 
 
+def _format_seed_item(item: dict[str, Any]) -> str:
+    """Compact seed item rendering — strips source_terms (filter-only), keeps instructional fields."""
+    canonical = item.get("canonical_vi") or item.get("vi") or item.get("canonical") or item.get("id") or ""
+    parts = [canonical if canonical else "Thuật ngữ"]
+    for key, label in (
+        ("realm_level_format", "format"),
+        ("policy", "rule"),
+        ("wrong_translations", "✗"),
+        ("forbidden", "cấm"),
+        ("forbidden_literal", "cấm literal"),
+        ("variants", "✓"),
+    ):
+        value = item.get(key)
+        if not value:
+            continue
+        if isinstance(value, list):
+            text_val = "/".join(str(v) for v in value[:4])
+            if len(value) > 4:
+                text_val += "/..."
+        else:
+            text_val = str(value)
+        parts.append(f"{label}={text_val}")
+    return " | ".join(parts)
+
+
 def _relevant_seed_glossary(
     seed_items: list[dict[str, Any]],
     story_glossary: list[dict[str, Any]],
     text: str,
-    max_items: int = 20,
+    max_items: int = 10,
 ) -> list[dict[str, Any]]:
     """Filter seed items relevant to text, excluding those already in story glossary."""
     story_canonicals = {
@@ -728,18 +774,18 @@ def build_story_memory_prompt(
     if chars:
         sections.append("NHÂN VẬT LIÊN QUAN TRONG ĐOẠN NÀY:\n" + "\n".join(_format_character(char) for char in chars))
 
-    glossary = _relevant_glossary(memory, text)
-    if glossary:
-        sections.append("GLOSSARY / DANH HIỆU / THUẬT NGỮ LIÊN QUAN:\n" + "\n".join(_format_glossary_item(item) for item in glossary))
-
     seed_items = load_seed_glossary(genre)
     if seed_items:
         seed_relevant = _relevant_seed_glossary(seed_items, memory.glossary, text)
         if seed_relevant:
             sections.append(
-                "THUẬT NGỮ THỂ LOẠI (seed — story-specific glossary thắng nếu mâu thuẫn):\n"
-                + "\n".join(_format_glossary_item(item) for item in seed_relevant)
+                "THUẬT NGỮ THỂ LOẠI (ưu tiên thấp hơn glossary truyện nếu mâu thuẫn):\n"
+                + "\n".join(_format_seed_item(item) for item in seed_relevant)
             )
+
+    glossary = _relevant_glossary(memory, text)
+    if glossary:
+        sections.append("GLOSSARY / DANH HIỆU / THUẬT NGỮ LIÊN QUAN:\n" + "\n".join(_format_glossary_item(item) for item in glossary))
 
     if memory.replacements:
         replacements = list(memory.replacements.items())[:40]
