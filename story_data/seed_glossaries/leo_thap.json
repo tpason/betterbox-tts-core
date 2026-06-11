@@ -1,0 +1,126 @@
+[
+  {
+    "source_terms": ["Tower", "The Tower", "Dungeon Tower", "Tháp", "탑", "塔"],
+    "canonical_vi": "Tháp",
+    "kind": "place",
+    "priority": true,
+    "wrong_translations": ["Cái Tháp", "Tower", "Tòa Tháp Ngục"],
+    "policy": "Tháp — đơn giản, không thêm 'cái' hay 'tòa'"
+  },
+  {
+    "source_terms": ["Floor", "Stage", "Level", "F", "층", "층계", "层"],
+    "canonical_vi": "Tầng",
+    "kind": "realm",
+    "priority": true,
+    "realm_level_format": "Tầng 1 / Tầng 50 / Tầng 100 — luôn dùng số Ả Rập",
+    "wrong_translations": ["Floor", "Stage", "Nhất Tầng", "Tầng Thứ Nhất"],
+    "policy": "leo_thap dùng số Ả Rập (Tầng 1, Tầng 50) KHÔNG phải Hán Việt"
+  },
+  {
+    "source_terms": ["Floor Guardian", "Floor Boss", "Stage Boss", "Guardian", "층주", "가디언", "守護者", "看守"],
+    "canonical_vi": "Boss Tầng",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Người Gác", "Người Bảo Vệ", "Guardian", "Kẻ Gác Cổng"],
+    "variants": ["Kẻ Cai Quản Tầng", "Người Gác Tầng"]
+  },
+  {
+    "source_terms": ["Tower Spirit", "Tower Manager", "Tower Master", "탑 정령", "탑의 의지", "塔靈"],
+    "canonical_vi": "Linh Hồn Tháp",
+    "kind": "other",
+    "wrong_translations": ["Thần Tháp", "Hồn Ma Tháp", "Tower Spirit"],
+    "variants": ["Tháp Linh", "Ý Chí Của Tháp"]
+  },
+  {
+    "source_terms": ["Clear", "Clear Condition", "Stage Clear", "클리어", "通過", "攻略"],
+    "canonical_vi": "Vượt Qua",
+    "kind": "other",
+    "wrong_translations": ["Clear", "Dọn Sạch", "Làm Sạch"],
+    "variants": ["Hoàn Thành Tầng", "Phá Tầng"]
+  },
+  {
+    "source_terms": ["Fail", "Fail Condition", "Death Condition", "실패 조건", "失敗條件"],
+    "canonical_vi": "Điều Kiện Thất Bại",
+    "kind": "other",
+    "wrong_translations": ["Fail", "Thất Bại Điều Kiện"]
+  },
+  {
+    "source_terms": ["Challenge", "Trial", "Test", "시련", "試練", "試驗"],
+    "canonical_vi": "Thử Thách",
+    "kind": "other",
+    "wrong_translations": ["Challenge", "Trial", "Kiểm Tra"],
+    "variants": ["Thử Thách Tầng", "Cuộc Thử Nghiệm"]
+  },
+  {
+    "source_terms": ["Tutorial", "Intro Stage", "튜토리얼", "引導"],
+    "canonical_vi": "Tutorial",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN 'Tutorial' — loanword phổ biến; hoặc 'Giai Đoạn Hướng Dẫn'",
+    "variants": ["Giai Đoạn Hướng Dẫn", "Tầng Nhập Môn"]
+  },
+  {
+    "source_terms": ["Karma", "Karma Points", "Tower Points", "업", "업보", "因果", "점수"],
+    "canonical_vi": "Điểm Karma",
+    "kind": "other",
+    "wrong_translations": ["Nghiệp Lực", "Karma", "Điểm Số"],
+    "policy": "Điểm Karma cho tower currency; Nghiệp Chướng cho cultivation karma"
+  },
+  {
+    "source_terms": ["Reward", "Compensation", "Prize", "보상", "報酬", "奖励"],
+    "canonical_vi": "Phần Thưởng",
+    "kind": "other",
+    "wrong_translations": ["Reward", "Bồi Thường"]
+  },
+  {
+    "source_terms": ["Challenger", "Participant", "도전자", "挑戰者", "参与者"],
+    "canonical_vi": "Người Thách Đấu",
+    "kind": "other",
+    "wrong_translations": ["Challenger", "Người Tham Gia"],
+    "variants": ["Người Chinh Phục Tháp", "Kẻ Leo Tháp"]
+  },
+  {
+    "source_terms": ["Solo Clear", "Solo Raid", "솔로 클리어", "단독 공략", "獨自攻略"],
+    "canonical_vi": "Phá Tầng Một Mình",
+    "kind": "other",
+    "wrong_translations": ["Solo Clear", "Một Mình Dọn Sạch"]
+  },
+  {
+    "source_terms": ["Ranker", "High Ranker", "Top Ranker", "랭커", "랭크", "排名者"],
+    "canonical_vi": "Ranker",
+    "kind": "other",
+    "policy": "GIỮ NGUYÊN 'Ranker' — loanword phổ biến trong leo tháp",
+    "variants": ["Người Xếp Hạng Cao"]
+  },
+  {
+    "source_terms": ["Hidden Stage", "Hidden Floor", "숨겨진 층", "隱藏層", "隱藏關卡"],
+    "canonical_vi": "Tầng Ẩn",
+    "kind": "place",
+    "wrong_translations": ["Hidden Floor", "Tầng Bí Mật", "Tầng Che Giấu"]
+  },
+  {
+    "source_terms": ["Safe Zone", "Rest Area", "안전지대", "安全地帶", "休息區"],
+    "canonical_vi": "Khu An Toàn",
+    "kind": "place",
+    "wrong_translations": ["Safe Zone", "Khu Vực Nghỉ Ngơi"],
+    "variants": ["Vùng An Toàn", "Khu Nghỉ"]
+  },
+  {
+    "source_terms": ["Special Reward", "Bonus Reward", "Hidden Reward", "숨겨진 보상", "隱藏獎勵"],
+    "canonical_vi": "Phần Thưởng Ẩn",
+    "kind": "other",
+    "wrong_translations": ["Hidden Reward", "Bonus Reward"]
+  },
+  {
+    "source_terms": ["First Clear", "First Conqueror", "최초 공략", "首次通關", "首攻"],
+    "canonical_vi": "Người Phá Tầng Đầu Tiên",
+    "kind": "other",
+    "wrong_translations": ["First Clear", "Người Dọn Sạch Đầu Tiên"]
+  },
+  {
+    "source_terms": ["Message", "Notification", "System Message", "알림", "메시지", "通知", "系統消息"],
+    "canonical_vi": "Thông Báo",
+    "kind": "other",
+    "wrong_translations": ["Message", "Notification"],
+    "policy": "Thông Báo cho system messages trong leo tháp context"
+  }
+]

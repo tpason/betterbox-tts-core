@@ -1,0 +1,116 @@
+[
+  {
+    "source_terms": ["Apocalypse", "End of the World", "Doomsday", "末世", "末日", "종말", "지구멸망"],
+    "canonical_vi": "Tận Thế",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Apocalypse", "Ngày Tận Thế", "Doomsday"],
+    "meaning": "thế giới sau thảm họa toàn cầu — zombie/monster/siêu năng lực xuất hiện"
+  },
+  {
+    "source_terms": ["Awakened", "Awakener", "Ability User", "각성자", "覺醒者", "能力者", "超能力者"],
+    "canonical_vi": "Người Thức Tỉnh",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Awakened", "Người Tỉnh Giấc", "Người Siêu Năng"],
+    "variants": ["Thức Tỉnh Giả", "Năng Lực Giả"]
+  },
+  {
+    "source_terms": ["Zombie", "Undead", "Infected", "Infected Human", "僵尸", "丧尸", "좀비", "감염자"],
+    "canonical_vi": "Zombie",
+    "kind": "other",
+    "priority": true,
+    "policy": "GIỮ NGUYÊN 'Zombie' — loanword chuẩn; hoặc 'Xác Sống' khi cần văn xuôi",
+    "variants": ["Xác Sống (undead context)", "Dị Thể (mutated infected)", "Người Nhiễm (early infection)"]
+  },
+  {
+    "source_terms": ["Mutant", "Evolved Zombie", "High-tier Zombie", "变异体", "진화한 좀비", "變異體", "突變體"],
+    "canonical_vi": "Thể Đột Biến",
+    "kind": "other",
+    "wrong_translations": ["Mutant", "Zombie Đột Biến"],
+    "variants": ["Biến Dị Thể", "Zombie Tiến Hóa"]
+  },
+  {
+    "source_terms": ["Crystal core", "Ability crystal", "Monster core", "异能晶核", "능력 결정", "晶核", "능력석"],
+    "canonical_vi": "Tinh Thạch",
+    "kind": "item",
+    "priority": true,
+    "wrong_translations": ["Crystal Core", "Lõi Pha Lê", "Đá Năng Lực"],
+    "meaning": "đá năng lực từ quái vật/zombie — nguồn tài nguyên chính trong tận thế"
+  },
+  {
+    "source_terms": ["Ability", "Power", "Superpower", "이능", "능력", "超能力", "異能"],
+    "canonical_vi": "Năng Lực",
+    "kind": "other",
+    "wrong_translations": ["Ability", "Siêu Năng"],
+    "variants": ["Siêu Năng Lực (superpower)", "Dị Năng (special ability)"]
+  },
+  {
+    "source_terms": ["Ability Awakening", "Awakening", "능력 각성", "覺醒", "能力覺醒"],
+    "canonical_vi": "Thức Tỉnh Năng Lực",
+    "kind": "other",
+    "wrong_translations": ["Ability Awakening", "Khả Năng Giác Ngộ"]
+  },
+  {
+    "source_terms": ["Safe Zone", "Shelter", "Base", "Refuge", "安全區", "避難所", "안전지대", "대피소"],
+    "canonical_vi": "Khu An Toàn",
+    "kind": "place",
+    "wrong_translations": ["Safe Zone", "Nơi Ẩn Náu"],
+    "variants": ["Khu Trú Ẩn", "Căn Cứ Địa"]
+  },
+  {
+    "source_terms": ["Survivor", "Survivor group", "幸存者", "生存者", "생존자"],
+    "canonical_vi": "Người Sống Sót",
+    "kind": "other",
+    "wrong_translations": ["Survivor", "Người Còn Lại"]
+  },
+  {
+    "source_terms": ["Evolution", "Level Up", "Evolve", "进化", "진화", "進化", "突破進化"],
+    "canonical_vi": "Tiến Hóa",
+    "kind": "other",
+    "wrong_translations": ["Evolution", "Phát Triển"],
+    "policy": "Tiến Hóa cho quái vật/zombie; Đột Phá cho người thức tỉnh tăng cấp"
+  },
+  {
+    "source_terms": ["Rank", "Grade", "Tier", "S-Rank", "A-Rank", "등급", "S급", "A급", "等級"],
+    "canonical_vi": "Hạng",
+    "kind": "realm",
+    "realm_level_format": "Hạng F / Hạng E / Hạng D / Hạng C / Hạng B / Hạng A / Hạng S / Hạng SS / Hạng SSS",
+    "wrong_translations": ["Rank", "Cấp Độ", "Tier"],
+    "policy": "mat_the dùng Hạng A-F hoặc S/A/B không phải cảnh giới Hán Việt"
+  },
+  {
+    "source_terms": ["Mutant beast", "Monster", "Beast", "异兽", "변이 괴물", "異獸", "怪物"],
+    "canonical_vi": "Dị Thú",
+    "kind": "other",
+    "wrong_translations": ["Monster", "Quái Vật (bình thường)"],
+    "variants": ["Quái Thú (general monster)", "Thú Đột Biến"]
+  },
+  {
+    "source_terms": ["Hunting team", "Raid team", "Team", "사냥팀", "討伐隊", "狩猎团队"],
+    "canonical_vi": "Đội Săn",
+    "kind": "organization",
+    "wrong_translations": ["Hunting Team", "Nhóm Đột Kích"]
+  },
+  {
+    "source_terms": ["Space storage", "Space ring", "Inventory", "储物空间", "공간 반지", "空間戒指"],
+    "canonical_vi": "Nhẫn Trữ Vật",
+    "kind": "item",
+    "wrong_translations": ["Space Ring", "Nhẫn Không Gian"],
+    "policy": "mat_the thường kết hợp với he_thong — dùng 'Nhẫn Trữ Vật' nếu fantasy, 'Túi Vật Phẩm' nếu game-style"
+  },
+  {
+    "source_terms": ["Heal", "Recovery", "Healing ability", "치유", "恢復", "回覆", "治愈"],
+    "canonical_vi": "Hồi Phục",
+    "kind": "technique",
+    "wrong_translations": ["Heal", "Hồi Máu"],
+    "variants": ["Chữa Lành", "Năng Lực Hồi Phục"]
+  },
+  {
+    "source_terms": ["Outbreak", "Zero Day", "Day Zero", "爆發", "발생일", "零日"],
+    "canonical_vi": "Ngày Bùng Phát",
+    "kind": "other",
+    "wrong_translations": ["Outbreak", "Ngày Bắt Đầu"],
+    "variants": ["Ngày Tận Thế (the day it started)", "Ngày Sụp Đổ"]
+  }
+]

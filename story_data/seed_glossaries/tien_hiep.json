@@ -378,5 +378,176 @@
     "canonical_vi": "Tà Đạo",
     "kind": "other",
     "wrong_translations": ["Con Đường Xấu Xa", "Evil Path"]
+  },
+
+  {
+    "source_terms": ["Body Refining", "Body Tempering", "Flesh Refinement", "Physical Cultivation", "Luyện Thể Kỳ", "炼体期", "炼体", "体修"],
+    "canonical_vi": "Luyện Thể",
+    "kind": "realm",
+    "realm_level_format": "Luyện Thể Nhất Tầng / Nhị Tầng ... Cửu Tầng (hoặc theo hệ truyện)",
+    "wrong_translations": ["Luyện Thân", "Body Training", "Luyện Cơ Thể", "Rèn Luyện Thể Xác"],
+    "meaning": "cảnh giới/giai đoạn luyện thể xác trước khi tu tiên — một số truyện là tiền đề Luyện Khí"
+  },
+  {
+    "source_terms": ["Houtian", "Postnatal", "Acquired", "后天", "후천"],
+    "canonical_vi": "Hậu Thiên",
+    "kind": "realm",
+    "wrong_translations": ["Hậu Thiên Nhiên", "Postnatal", "Acquired Stage"],
+    "meaning": "cảnh giới 'bình thường' — chưa mở thông Tiên Thiên (先天)"
+  },
+  {
+    "source_terms": ["Xiantian", "Innate", "Prenatal", "先天", "선천"],
+    "canonical_vi": "Tiên Thiên",
+    "kind": "realm",
+    "realm_level_format": "Tiên Thiên Sơ Kỳ / Trung Kỳ / Hậu Kỳ",
+    "wrong_translations": ["Thiên Bẩm", "Innate Stage", "Prenatal"],
+    "meaning": "cảnh giới mở thông kinh mạch bẩm sinh — bước ngoặt trong nhiều hệ thống tu luyện"
+  },
+  {
+    "source_terms": ["Qi Deviation", "Walking Fire Entering Demon", "走火入魔", "기운 편차", "入魔"],
+    "canonical_vi": "Tẩu Hỏa Nhập Ma",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Qi Deviation", "Chệch Hướng Khí", "Đi Sai Đường", "Nhập Ma"],
+    "meaning": "trạng thái nguy hiểm khi tu luyện bị loạn — có thể gây phế tu hay tử vong"
+  },
+  {
+    "source_terms": ["Bottleneck", "Barrier", "Cultivation barrier", "瓶颈", "关卡", "屏障"],
+    "canonical_vi": "Bình Cảnh",
+    "kind": "other",
+    "wrong_translations": ["Bottleneck", "Nút Thắt Cổ Chai", "Rào Cản Tu Luyện"],
+    "meaning": "bức tường ngăn cách không thể đột phá lên cảnh giới tiếp theo"
+  },
+  {
+    "source_terms": ["Internal Demon", "Heart Devil", "Demon of the Heart", "心魔", "내면의 악마"],
+    "canonical_vi": "Tâm Ma",
+    "kind": "other",
+    "wrong_translations": ["Ma Quỷ Bên Trong", "Quỷ Nội Tâm", "Internal Demon", "Heart Devil"],
+    "meaning": "ám ảnh/sợ hãi/ác niệm tích tụ trong tâm — cản trở tu luyện và đột phá"
+  },
+  {
+    "source_terms": ["Jade Slip", "Jade Simple", "玉简", "玉牌", "기억 구슬"],
+    "canonical_vi": "Ngọc Giản",
+    "kind": "item",
+    "wrong_translations": ["Mảnh Ngọc", "Bảng Ngọc", "Jade Slip", "Jade Tablet"],
+    "meaning": "vật lưu trữ thông tin/công pháp bằng linh lực — như USB của tu tiên"
+  },
+  {
+    "source_terms": ["Flying Sword", "Sword Flight", "Fly on Sword", "飞剑", "御剑飞行", "검선"],
+    "canonical_vi": "Phi Kiếm",
+    "kind": "technique",
+    "wrong_translations": ["Kiếm Bay", "Bay Bằng Kiếm", "Flying Sword"],
+    "meaning": "dùng kiếm làm phương tiện bay — kỹ năng của tu sĩ Kiếm Tu"
+  },
+  {
+    "source_terms": ["Sword Domain", "Domain", "Sword World", "剑域", "领域", "검역"],
+    "canonical_vi": "Kiếm Vực",
+    "kind": "technique",
+    "wrong_translations": ["Lãnh Thổ Kiếm", "Sword Domain", "Phạm Vi Kiếm"],
+    "variants": ["Lĩnh Vực (domain tổng quát)", "Kiếm Cảnh (sword realm)"]
+  },
+  {
+    "source_terms": ["Alchemy", "Pill Refining", "Pill Making", "炼丹", "연단", "製藥"],
+    "canonical_vi": "Luyện Đan",
+    "kind": "technique",
+    "wrong_translations": ["Chế Thuốc", "Alchemy", "Làm Thuốc Tiên"],
+    "variants": ["Đan Luyện", "Bào Chế Đan Dược"]
+  },
+  {
+    "source_terms": ["Alchemist", "Pill Master", "Dan Master", "炼丹师", "丹药师", "연단사"],
+    "canonical_vi": "Đan Sư",
+    "kind": "title",
+    "wrong_translations": ["Alchemist", "Thầy Thuốc", "Người Luyện Đan"],
+    "realm_level_format": "Đan Sư → Đại Đan Sư → Đan Thánh → Đan Thần",
+    "variants": ["Đại Đan Sư (high level)", "Đan Thánh (peak)"]
+  },
+  {
+    "source_terms": ["Array Master", "Formation Master", "阵法师", "阵师", "진법사"],
+    "canonical_vi": "Trận Sư",
+    "kind": "title",
+    "wrong_translations": ["Formation Master", "Người Lập Trận"],
+    "realm_level_format": "Trận Sư → Đại Trận Sư → Trận Thánh"
+  },
+  {
+    "source_terms": ["Pill Furnace", "Cauldron", "Alchemy Furnace", "丹炉", "鼎炉", "연단로"],
+    "canonical_vi": "Đỉnh Lô",
+    "kind": "item",
+    "wrong_translations": ["Cauldron", "Nồi Luyện", "Lò Nung"],
+    "variants": ["Đan Lô", "Linh Đỉnh"]
+  },
+  {
+    "source_terms": ["Low grade", "Low quality", "Common grade", "下品", "低阶", "하품"],
+    "canonical_vi": "Hạ Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Low Grade", "Hạng Thấp"],
+    "policy": "Thứ bậc: Hạ Phẩm < Trung Phẩm < Thượng Phẩm < Tiên Phẩm — Hán Việt cho tiên hiệp"
+  },
+  {
+    "source_terms": ["Middle grade", "Medium quality", "中品", "中阶", "중품"],
+    "canonical_vi": "Trung Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Middle Grade", "Hạng Trung"]
+  },
+  {
+    "source_terms": ["High grade", "Top quality", "上品", "高阶", "상품"],
+    "canonical_vi": "Thượng Phẩm",
+    "kind": "other",
+    "wrong_translations": ["High Grade", "Hạng Cao"]
+  },
+  {
+    "source_terms": ["Immortal grade", "Celestial grade", "仙品", "仙器", "선품"],
+    "canonical_vi": "Tiên Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Immortal Grade", "Loại Tiên"],
+    "policy": "Tiên Phẩm = cấp cao nhất trong phân loại vật phẩm tiên hiệp"
+  },
+  {
+    "source_terms": ["Five Elements", "Wuxing", "五行", "오행"],
+    "canonical_vi": "Ngũ Hành",
+    "kind": "other",
+    "wrong_translations": ["Five Elements", "Năm Nguyên Tố", "Wuxing"],
+    "meaning": "Kim/Mộc/Thủy/Hỏa/Thổ — hệ phân loại linh căn và phép thuật tiên hiệp"
+  },
+  {
+    "source_terms": ["Chaotic Body", "Innate Chaotic Body", "混沌体", "혼돈체", "混沌之體"],
+    "canonical_vi": "Hỗn Độn Chi Thể",
+    "kind": "other",
+    "wrong_translations": ["Chaotic Body", "Thân Hỗn Loạn"],
+    "meaning": "thể chất đặc biệt hiếm có — sở hữu tất cả ngũ hành hoặc vượt ngũ hành"
+  },
+  {
+    "source_terms": ["Lightning Spirit Root", "Thunder Spirit Root", "雷灵根", "天雷灵根"],
+    "canonical_vi": "Lôi Linh Căn",
+    "kind": "other",
+    "wrong_translations": ["Lightning Root", "Sét Linh Căn"],
+    "variants": ["Thiên Lôi Linh Căn (heavenly lightning)"]
+  },
+  {
+    "source_terms": ["Sword Cultivator", "Sword Xiu", "Sword Immortal", "剑修", "剑仙", "검수"],
+    "canonical_vi": "Kiếm Tu",
+    "kind": "other",
+    "wrong_translations": ["Người Tu Kiếm", "Sword Cultivator"],
+    "variants": ["Kiếm Tiên (sword immortal)"]
+  },
+  {
+    "source_terms": ["Dual Cultivation", "Dual Practice", "双修", "쌍수련", "雙修"],
+    "canonical_vi": "Song Tu",
+    "kind": "technique",
+    "wrong_translations": ["Dual Cultivation", "Luyện Đôi"],
+    "meaning": "tu luyện cùng bạn đồng hành — có thể là chiến đấu hoặc có hàm ý khác"
+  },
+  {
+    "source_terms": ["Breathing Technique", "Breathing Exercise", "Innate Breath", "吐纳", "호흡법", "調息"],
+    "canonical_vi": "Thổ Nạp",
+    "kind": "technique",
+    "wrong_translations": ["Bài Tập Thở", "Breathing Exercise"],
+    "meaning": "kỹ thuật hít thở để hấp thu linh khí thiên địa"
+  },
+  {
+    "source_terms": ["Insight", "Enlightenment", "Epiphany", "顿悟", "참悟", "頓悟", "悟道"],
+    "canonical_vi": "Đốn Ngộ",
+    "kind": "other",
+    "wrong_translations": ["Insight", "Giác Ngộ Đột Ngột", "Epiphany"],
+    "variants": ["Cảm Ngộ (gradual realization)", "Ngộ Đạo (dao enlightenment)"]
   }
 ]
