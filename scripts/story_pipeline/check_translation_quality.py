@@ -853,8 +853,10 @@ def main() -> None:
     # Auto-detect genre
     genre = args.genre
     if not genre and char_map:
-        from genre_prompts import infer_genre_from_char_map
-        genre = infer_genre_from_char_map(char_map)
+        from genre_prompts import infer_genre_from_char_map, load_char_map
+        # infer_genre_from_char_map expects char map TEXT, not the file path —
+        # truyền path làm genre rơi về DB fallback (sai genre cho map có header riêng).
+        genre = infer_genre_from_char_map(load_char_map(char_map))
     if not genre:
         with connect() as conn:
             rows = conn.execute(
