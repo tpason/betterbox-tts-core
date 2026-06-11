@@ -9,19 +9,28 @@ Hai cách dùng:
   2. CLI: scan và optionally trigger repolish cho chapters có vấn đề.
      python check_translation_quality.py --story-id <id> [--repolish-bad]
 
-Quality rules:
+Quality rules (blocking):
   - not_vietnamese: output không phải tiếng Việt
+  - cjk_not_translated: còn ký tự CJK chưa dịch
+  - repeated_content: đoạn văn lặp (exact hoặc near-duplicate — model looping)
   - forbidden_term: term bị cấm trong char map (## !! TRÁNH:)
   - wrong_pronoun: dùng hắn/nàng/lão/y trong văn kể (western_fantasy only)
   - large_en_block: đoạn tiếng Anh > 80 chars chưa dịch
+
+Quality rules (warning — chưa block, đang calibrate):
+  - length_ratio_low: output ngắn bất thường so với source (có thể bị tóm tắt/bỏ đoạn)
+  - structure_drift: số đoạn văn / dòng thoại lệch mạnh so với source
+  - source_unavailable: không load được source text → không check completeness được
 """
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
+from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -29,7 +38,11 @@ for p in (str(ROOT), str(SCRIPT_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from story_db.story_pipeline_db.db import connect
+def connect():
+    """Lazy DB import — library use (check_polished_quality / run_full_quality_check)
+    không cần story_db; chỉ CLI scan/retranslate mới cần."""
+    from story_db.story_pipeline_db.db import connect as _connect
+    return _connect()
 
 # ── Vietnamese detection (standalone, no circular import) ────────────────────
 _VI_DIACRITIC_RE = re.compile(
@@ -69,6 +82,31 @@ BLOCKING_QUALITY_ISSUES: frozenset[str] = frozenset({
     "forbidden_term",  # dùng từ bị cấm trong char map
 })
 
+# Length-ratio floors theo ngôn ngữ nguồn: len(polished, no-ws) / len(source, no-ws).
+# Warning-only cho tới khi đo empirical từ known-good chapters và promote
+# `truncated_output` vào BLOCKING_QUALITY_ISSUES. Override qua env:
+#   QUALITY_LENGTH_FLOOR_EN=0.8 QUALITY_LENGTH_FLOOR_ZH=1.3 ...
+_LENGTH_RATIO_FLOORS_DEFAULT: dict[str, float] = {
+    "en": 0.75,  # VI thường ~0.9–1.2x EN chars
+    "zh": 1.2,   # VI ~1.5–2.2x ZH chars
+    "cn": 1.2,
+    "ko": 0.8,
+    "kr": 0.8,
+    "vi": 0.7,   # polish VI→VI — khớp min_output_ratio fallback hiện có
+}
+_LENGTH_RATIO_FLOOR_FALLBACK = 0.7
+
+
+def _length_ratio_floor(source_language: str) -> float:
+    lang = (source_language or "").strip().lower()
+    env = os.environ.get(f"QUALITY_LENGTH_FLOOR_{lang.upper()}")
+    if env:
+        try:
+            return float(env)
+        except ValueError:
+            pass
+    return _LENGTH_RATIO_FLOORS_DEFAULT.get(lang, _LENGTH_RATIO_FLOOR_FALLBACK)
+
 
 def issue_to_repair_hint(issue: str) -> str:
     """Convert a quality issue code to a Vietnamese repair instruction for the model."""
@@ -86,6 +124,12 @@ def issue_to_repair_hint(issue: str) -> str:
     if base == "forbidden_term":
         term = issue[len("forbidden_term:"):].strip() if ":" in issue else ""
         return f"Dùng từ bị cấm {term} — đổi theo char map." if term else "Còn từ bị cấm trong char map — kiểm tra và đổi."
+    if base in {"length_ratio_low", "truncated_output"}:
+        return ("Output ngắn bất thường so với bản gốc — dịch ĐẦY ĐỦ mọi câu, mọi đoạn; "
+                "tuyệt đối không tóm tắt, không bỏ đoạn.")
+    if base == "structure_drift":
+        return ("Số đoạn văn/dòng thoại lệch mạnh so với bản gốc — giữ nguyên cấu trúc đoạn "
+                "và đầy đủ các câu thoại của bản gốc.")
     return f"Lỗi chất lượng: {issue}"
 
 
@@ -115,15 +159,84 @@ def _has_cjk_contamination(text: str, threshold: int = 5) -> bool:
     return len(_CJK_RE.findall(text)) >= threshold
 
 
-def _has_repeated_content(text: str, min_block: int = 120) -> bool:
-    """True if any paragraph of >= min_block chars appears more than once (model looping)."""
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if len(p.strip()) >= min_block]
+_NORMALIZE_PARA_RE = re.compile(r"[\s\.,;:!\?\"'“”‘’\-—…]+", re.UNICODE)
+
+
+def _normalize_paragraph(p: str) -> str:
+    return _NORMALIZE_PARA_RE.sub(" ", p.lower()).strip()
+
+
+def _has_repeated_content(
+    text: str, min_block: int = 120, near_dup_ratio: float = 0.92, window: int = 8
+) -> bool:
+    """True if any paragraph of >= min_block chars repeats (model looping).
+
+    Bắt cả exact-duplicate (sau normalize whitespace/punctuation/case) lẫn
+    near-duplicate: SequenceMatcher ratio >= near_dup_ratio so với các paragraph
+    trong sliding window `window` đoạn gần nhất — giữ O(n·window).
+    """
+    paragraphs = [
+        _normalize_paragraph(p)
+        for p in re.split(r"\n\s*\n", text)
+        if len(p.strip()) >= min_block
+    ]
     seen: set[str] = set()
-    for p in paragraphs:
+    for i, p in enumerate(paragraphs):
         if p in seen:
             return True
         seen.add(p)
+        for j in range(max(0, i - window), i):
+            other = paragraphs[j]
+            # Quick length pre-filter: very different lengths can't be near-dups.
+            if min(len(p), len(other)) / max(len(p), len(other), 1) < near_dup_ratio:
+                continue
+            if SequenceMatcher(None, p, other).ratio() >= near_dup_ratio:
+                return True
     return False
+
+
+# ── Completeness / structure checks (warning-only until calibrated) ─────────
+
+def _strip_len(text: str) -> int:
+    return len(re.sub(r"\s+", "", text or ""))
+
+
+def _count_dialogue_lines(text: str) -> int:
+    count = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(('"', "'", "“", "‘", "—", "[", "【")):
+            count += 1
+    return count
+
+
+def check_completeness(
+    polished_text: str, source_text: str, source_language: str = ""
+) -> list[str]:
+    """So polished với source — bắt tóm tắt/bỏ đoạn. Trả warnings (chưa blocking)."""
+    issues: list[str] = []
+    src_len = _strip_len(source_text)
+    out_len = _strip_len(polished_text)
+    if src_len < 200:
+        return issues  # source quá ngắn, ratio không có ý nghĩa
+
+    ratio = out_len / src_len
+    floor = _length_ratio_floor(source_language)
+    if ratio < floor:
+        issues.append(f"length_ratio_low:{ratio:.2f}<{floor:.2f}")
+
+    # Structural signals: bắt missing-middle-paragraphs khi total length vẫn bình thường.
+    src_paras = len([p for p in re.split(r"\n\s*\n", source_text) if p.strip()])
+    out_paras = len([p for p in re.split(r"\n\s*\n", polished_text) if p.strip()])
+    if src_paras >= 8 and out_paras < src_paras * 0.5:
+        issues.append(f"structure_drift:paragraphs:{out_paras}/{src_paras}")
+
+    src_dlg = _count_dialogue_lines(source_text)
+    out_dlg = _count_dialogue_lines(polished_text)
+    if src_dlg >= 10 and out_dlg < src_dlg * 0.5:
+        issues.append(f"structure_drift:dialogue_lines:{out_dlg}/{src_dlg}")
+
+    return issues
 
 
 def _extract_forbidden_terms(char_map_path: str) -> list[str]:
@@ -161,11 +274,16 @@ def check_polished_quality(
     text: str,
     genre: str = "",
     char_map_path: str = "",
+    source_text: str = "",
+    source_language: str = "",
 ) -> list[str]:
     """
     Trả về list các quality issue (empty = OK).
     Issues trong BLOCKING_QUALITY_ISSUES sẽ trigger retry; còn lại là warnings.
     Gọi sau khi polish xong, trước khi save vào DB.
+
+    source_text/source_language (optional): bật completeness check
+    (length_ratio_low / structure_drift — warning-only cho tới khi calibrate xong).
     """
     issues: list[str] = []
     if not text or len(text.strip()) < 100:
@@ -204,7 +322,68 @@ def check_polished_quality(
     if en_blocks:
         issues.append(f"large_en_block:{len(en_blocks)}")
 
+    # Check 7: completeness vs source (warning-only)
+    if source_text:
+        issues.extend(check_completeness(text, source_text, source_language))
+
     return issues
+
+
+def split_blocking_warnings(issues: list[str]) -> tuple[list[str], list[str]]:
+    """Phân issues thành (blocking, warnings) theo BLOCKING_QUALITY_ISSUES."""
+    blocking = [i for i in issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
+    warnings = [i for i in issues if i not in blocking]
+    return blocking, warnings
+
+
+def run_full_quality_check(
+    text: str,
+    *,
+    genre: str = "",
+    char_map: str = "",
+    story_id: str = "",
+    slug: str = "",
+    story_memory_dir: str = "",
+    source_text: str = "",
+    source_language: str = "",
+    log: Callable[[str], None] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Full quality check — char map heuristics + story-memory QA. Returns (blocking, warnings).
+
+    Đây là logic chung cho cả worker gate (polish_worker._quality_check) lẫn CLI
+    scanner, để offline scan và gate không bao giờ drift nhau.
+
+    Blocking = BLOCKING_QUALITY_ISSUES + story-memory term/name drift (glossary
+    forbidden terms). Register/format drift từ story memory chỉ là warning.
+    """
+    issues = check_polished_quality(
+        text,
+        genre=genre,
+        char_map_path=char_map,
+        source_text=source_text,
+        source_language=source_language,
+    )
+    blocking, warnings = split_blocking_warnings(issues)
+
+    try:
+        from story_memory import find_story_memory_quality_issues, load_story_memory
+        memory = load_story_memory(
+            story_memory_dir=story_memory_dir,
+            story_id=story_id,
+            slug=slug,
+            char_map_file=char_map,
+        )
+        if memory.loaded:
+            for issue in find_story_memory_quality_issues(text, memory, genre=genre):
+                if issue.startswith("term/name drift"):
+                    blocking.append(issue)
+                else:
+                    warnings.append(issue)
+    except Exception as exc:  # noqa: BLE001 — memory QA không được làm chết caller
+        if log:
+            log(f"[QUALITY] story memory QA error: {exc}")
+
+    return blocking, warnings
 
 
 # ── DB scan ─────────────────────────────────────────────────────────────────
@@ -214,7 +393,7 @@ def fetch_polished_chapters(story_id: str, from_ch: int, to_ch: int) -> list[dic
         SELECT
             c.id AS chapter_id, c.chapter_number, c.title AS chapter_title,
             c.polished_text_content, c.polished_text_path,
-            c.raw_text_path, c.translated_text_path,
+            c.raw_text_content, c.raw_text_path, c.translated_text_path,
             c.is_polished, c.is_translated,
             s.id AS story_id,
             s.title AS story_title, s.metadata AS story_metadata,
@@ -252,24 +431,71 @@ def _read_polished_text(row: dict) -> str:
     return content
 
 
+def _read_source_text(row: dict) -> str:
+    """Load raw source text: ưu tiên raw_text_content (DB-only crawls) rồi raw_text_path."""
+    content = row.get("raw_text_content") or ""
+    if not content and row.get("raw_text_path"):
+        try:
+            p = Path(row["raw_text_path"])
+            if not p.is_absolute():
+                p = ROOT / p
+            content = p.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return content
+
+
 def scan_story(
     story_id: str,
     from_ch: int = 0,
     to_ch: int = 0,
     char_map_path: str = "",
     genre: str = "",
+    story_memory_dir: str = "",
 ) -> list[dict]:
-    """Scan polished chapters, return list of {chapter_number, issues}."""
+    """Scan polished chapters, return list of {chapter_number, issues, blocking, warnings}.
+
+    Dùng run_full_quality_check — cùng logic với worker gate (char map heuristics
+    + story-memory QA + completeness), offline scan không drift so với gate.
+    """
     rows = fetch_polished_chapters(story_id, from_ch, to_ch)
     results = []
     for row in rows:
         text = _read_polished_text(row)
         if not text:
-            results.append({"chapter_number": row["chapter_number"], "issues": ["no_polished_text"]})
+            results.append({
+                "chapter_number": row["chapter_number"],
+                "issues": ["no_polished_text"], "blocking": ["no_polished_text"], "warnings": [],
+            })
             continue
-        issues = check_polished_quality(text, genre=genre, char_map_path=char_map_path)
-        if issues:
-            results.append({"chapter_number": row["chapter_number"], "chapter_id": row["chapter_id"], "issues": issues})
+        source_text = _read_source_text(row)
+        raw_language = (row.get("raw_language") or "").strip().lower()
+        slug = ""
+        if row.get("raw_text_path"):
+            slug = Path(row["raw_text_path"]).parent.name
+        blocking, warnings = run_full_quality_check(
+            text,
+            genre=genre,
+            char_map=char_map_path,
+            story_id=str(row.get("story_id") or story_id),
+            slug=slug,
+            log=print,
+        )
+        if source_text:
+            # Completeness chạy riêng để gắn warning đúng nhóm (đã nằm trong
+            # run_full_quality_check khi truyền source — ở đây truyền tách để
+            # rows thiếu source vẫn được báo source_unavailable).
+            warnings.extend(check_completeness(text, source_text, raw_language))
+        else:
+            warnings.append("source_unavailable")
+        if blocking or warnings:
+            results.append({
+                "chapter_number": row["chapter_number"],
+                "chapter_id": row["chapter_id"],
+                "issues": blocking + warnings,
+                "blocking": blocking,
+                "warnings": warnings,
+            })
     return results
 
 
@@ -639,9 +865,28 @@ def main() -> None:
         print("[OK] Không tìm thấy chapter nào có vấn đề.")
         return
 
-    print(f"\n[ISSUES] {len(bad)} chapter(s) có vấn đề:\n")
+    n_blocking = sum(1 for r in bad if r.get("blocking"))
+    print(f"\n[ISSUES] {len(bad)} chapter(s) có vấn đề ({n_blocking} blocking):\n")
     for r in bad:
-        print(f"  ch{r['chapter_number']:04d}: {', '.join(r['issues'])}")
+        parts = []
+        if r.get("blocking"):
+            parts.append("BLOCK: " + ", ".join(r["blocking"]))
+        if r.get("warnings"):
+            parts.append("warn: " + ", ".join(r["warnings"]))
+        print(f"  ch{r['chapter_number']:04d}: {' | '.join(parts) or ', '.join(r['issues'])}")
+
+    # Actions chỉ áp dụng cho chapters có blocking issue — warnings (length_ratio_low,
+    # source_unavailable...) không tự trigger retranslate. Nếu user truyền --issue-filter
+    # thì coi như chủ động chọn, dùng nguyên list đã filter.
+    if not issue_filter:
+        actionable = [r for r in bad if r.get("blocking")]
+        if len(actionable) != len(bad) and (args.retranslate_bad or args.repolish_bad):
+            print(f"\n[NOTE] {len(bad) - len(actionable)} chapter(s) chỉ có warnings — bỏ qua khi "
+                  f"retranslate/repolish (dùng --issue-filter để chọn warnings cụ thể).")
+        bad = actionable if (args.retranslate_bad or args.repolish_bad) else bad
+        if not bad and (args.retranslate_bad or args.repolish_bad):
+            print("[OK] Không có chapter nào với blocking issue.")
+            return
 
     if args.fix_pronouns:
         n = fix_pronouns_in_db(bad, dry_run=args.dry_run)

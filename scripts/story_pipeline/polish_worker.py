@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 from story_db.story_pipeline_db import repository as repo
-from genre_prompts import detect_genre, find_char_map_file, resolve_genre_from_context
+from genre_prompts import clean_source_noise, detect_genre, find_char_map_file, resolve_genre_from_context
 from extract_char_map import update_char_map_incremental
 from polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from reader_content_format import format_polished_content as format_reader_polished_content
@@ -31,6 +31,8 @@ from check_translation_quality import (
     _WRONG_PRONOUN_GENRES,
     _fix_pronouns_in_text,
     check_polished_quality,
+    issue_to_repair_hint,
+    run_full_quality_check,
 )
 from story_memory import find_story_memory_quality_issues, load_story_memory
 from extract_term_glossary import glossary_path_for, update_term_glossary
@@ -644,33 +646,25 @@ def _quality_check(
     story_id: str = "",
     slug: str = "",
     story_memory_dir: str = "",
+    source_text: str = "",
+    source_language: str = "",
 ) -> tuple[list[str], list[str]]:
     """Check quality and log. Returns (blocking, warnings).
 
-    Blocking = BLOCKING_QUALITY_ISSUES + story-memory term/name drift (glossary
-    forbidden terms). Register/format drift from story memory chỉ là warning.
+    Thin wrapper quanh run_full_quality_check (shared với CLI scanner) — chỉ thêm
+    worker-style logging.
     """
-    issues = check_polished_quality(text, genre=genre, char_map_path=char_map)
-    blocking = [i for i in issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
-    warnings = [i for i in issues if i not in blocking]
-
-    # Story-memory QA: glossary forbidden terms / wrong name spellings là blocking.
-    try:
-        memory = load_story_memory(
-            story_memory_dir=story_memory_dir,
-            story_id=story_id,
-            slug=slug,
-            char_map_file=char_map,
-        )
-        if memory.loaded:
-            for issue in find_story_memory_quality_issues(text, memory, genre=genre):
-                if issue.startswith("term/name drift"):
-                    blocking.append(issue)
-                else:
-                    warnings.append(issue)
-    except Exception as exc:  # noqa: BLE001 — memory QA không được làm chết job
-        log(f"[QUALITY] story memory QA error ({label}): {exc}")
-
+    blocking, warnings = run_full_quality_check(
+        text,
+        genre=genre,
+        char_map=char_map,
+        story_id=story_id,
+        slug=slug,
+        story_memory_dir=story_memory_dir,
+        source_text=source_text,
+        source_language=source_language,
+        log=lambda msg: log(f"{msg} ({label})"),
+    )
     if blocking:
         log(f"[QUALITY_FAIL] {label}: {', '.join(blocking)}")
     if warnings:
@@ -688,6 +682,8 @@ def _gated_pass(
     label: str,
     story_id: str = "",
     slug: str = "",
+    source_text: str = "",
+    source_language: str = "",
     cleanup_on_fail: tuple[Path, ...] = (),
 ) -> str:
     """Run an LLM pass with a chapter-level quality gate.
@@ -719,6 +715,8 @@ def _gated_pass(
             story_id=story_id,
             slug=slug,
             story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+            source_text=source_text,
+            source_language=source_language,
         )
         if not blocking or mode != "block":
             return text
@@ -881,6 +879,15 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
 
     maybe_translate_story_metadata(job, args)
 
+    # Source text cho completeness check trong quality gate (length ratio /
+    # structure drift — warning-only). Strip noise giống translate pass để ratio
+    # so trên cùng nội dung thực.
+    try:
+        gate_source_text = clean_source_noise(input_path.read_text(encoding="utf-8")).strip()
+    except Exception as exc:  # noqa: BLE001 — completeness là enhancement
+        log(f"[QUALITY] cannot read source for completeness check: {exc}")
+        gate_source_text = ""
+
     # Auto-resolve char map: payload > --char-map-file arg > convention-based lookup
     story_id = str(job.get("story_id") or "")
     job_slug = story_slug_for_job(job, input_path)
@@ -942,6 +949,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 story_id=story_id,
                 slug=job_slug,
                 story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+                source_text=gate_source_text,
+                source_language=raw_language,
             )
         if existing_blocking:
             log(f"[QUALITY_GATE] existing output failed check → re-running pass: {output_path}")
@@ -993,6 +1002,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"vi ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            source_text=gate_source_text,
+            source_language="vi",
             cleanup_on_fail=(output_path,),
         )
         repo.update_chapter_text_outputs(
@@ -1018,6 +1029,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"single-pass ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            source_text=gate_source_text,
+            source_language=raw_language,
             cleanup_on_fail=(output_path,),
         )
         repo.update_chapter_text_outputs(
@@ -1073,6 +1086,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"translate ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            source_text=gate_source_text,
+            source_language=raw_language,
             cleanup_on_fail=(translated_path,),
         )
         translated_chapter_title = maybe_update_translated_chapter_title(job, translated_text_content)
@@ -1109,6 +1124,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 label=f"copy ch{current_chapter}",
                 story_id=story_id,
                 slug=job_slug,
+                source_text=gate_source_text,
+                source_language=raw_language,
                 cleanup_on_fail=(output_path, translated_path) if no_save else (output_path,),
             )
         else:
@@ -1131,6 +1148,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 label=f"two-pass ch{current_chapter}",
                 story_id=story_id,
                 slug=job_slug,
+                source_text=gate_source_text,
+                source_language=raw_language,
                 cleanup_on_fail=(output_path, translated_path) if no_save else (output_path,),
             )
         # Discard temp translated file only after polish finishes reading it.
