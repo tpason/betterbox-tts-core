@@ -21,7 +21,14 @@ if str(ROOT) not in sys.path:
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 from story_db.story_pipeline_db import repository as repo
-from genre_prompts import detect_genre, find_char_map_file, resolve_genre_from_context
+from genre_prompts import (
+    clean_source_noise,
+    detect_genre,
+    find_char_map_file,
+    load_char_map,
+    resolve_genre_from_context,
+    validate_char_map,
+)
 from extract_char_map import update_char_map_incremental
 from polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from reader_content_format import format_polished_content as format_reader_polished_content
@@ -31,9 +38,16 @@ from check_translation_quality import (
     _WRONG_PRONOUN_GENRES,
     _fix_pronouns_in_text,
     check_polished_quality,
+    issue_to_repair_hint,
+    run_full_quality_check,
 )
-from story_memory import find_story_memory_quality_issues, load_story_memory
+from story_memory import (
+    find_story_memory_quality_issues,
+    load_story_memory,
+    save_chapter_recap,
+)
 from extract_term_glossary import glossary_path_for, update_term_glossary
+from llm_quality_judge import judge_chapter_quality
 
 
 def story_slug_for_job(job: dict, input_path: Path) -> str:
@@ -210,11 +224,12 @@ def maybe_auto_update_char_map(
                     repo.update_story_metadata(story_id, {"char_map_raw_covered_to": seed_end})
                 except Exception:
                     pass
+                # Codex finding 1: refresh path — existing_char_map was empty before seed
+                refreshed = find_char_map_file(story_id=story_id, slug=slug)
+                if refreshed:
+                    log(f"[CHAR_MAP] seed ready {refreshed}")
+                    return refreshed
                 return existing_char_map
-            refreshed = find_char_map_file(story_id=story_id, slug=slug)
-            if refreshed:
-                log(f"[CHAR_MAP] seed ready {refreshed}")
-                return refreshed
         except Exception as exc:
             log(f"[CHAR_MAP WARN] seed extract failed: {type(exc).__name__}: {exc}")
             _record_char_map_create_failure(story_id, current_chapter)
@@ -314,6 +329,11 @@ def _run_incremental_char_map(
         log(f"[CHAR_MAP_INC WARN] ch{chapter_num:04d}: {exc}")
 
 
+def _lookahead_coverage_key(text_source: str) -> str:
+    """Return the metadata key tracking lookahead coverage for a given text_source."""
+    return "char_map_raw_covered_to" if text_source == "raw" else f"char_map_{text_source}_covered_to"
+
+
 def _run_lookahead_char_map(
     job: dict,
     args: argparse.Namespace,
@@ -322,11 +342,12 @@ def _run_lookahead_char_map(
     char_map_path: str,
     slug: str,
     genre: str,
+    text_source: str = "raw",
 ) -> None:
-    """Pre-extract characters from raw text N chapters ahead of current_chapter.
+    """Pre-extract characters N chapters ahead of current_chapter.
 
-    Keeps char_map_raw_covered_to = current_chapter + lookahead_window so that
-    when translating ch11, the char-map already has raw character data up to ch21.
+    Uses source-aware coverage metadata so raw and translated lookahead
+    track independently (char_map_raw_covered_to vs char_map_translated_covered_to).
 
     Each call extends coverage by exactly 1 chapter (incremental sliding window),
     so the overhead per chapter is a single LLM call (~30-60s). No block pipeline.
@@ -343,28 +364,32 @@ def _run_lookahead_char_map(
         return
 
     target = current_chapter + lookahead
+    coverage_key = _lookahead_coverage_key(text_source)
 
     try:
         story = repo.get_story_by_id(story_id)
         metadata = story.get("metadata") or {}
-        raw_covered = int(metadata.get("char_map_raw_covered_to") or 0)
+        covered = int(metadata.get(coverage_key) or 0)
     except Exception:
-        raw_covered = 0
+        covered = 0
 
-    if raw_covered >= target:
+    if covered >= target:
         return  # already ahead enough
 
-    from_ch = raw_covered + 1
+    from_ch = covered + 1
     model = str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b"))
     char_map_timeout = max(30, int(getattr(args, "char_map_timeout", 90) or 90))
     n_new = target - from_ch + 1
 
-    log(f"[CHAR_MAP LOOKAHEAD] ch{from_ch:04d}→ch{target:04d} (raw, {n_new} chaps) story_id={story_id}")
+    log(
+        f"[CHAR_MAP LOOKAHEAD] ch{from_ch:04d}→ch{target:04d} "
+        f"(text_source={text_source}, {n_new} chaps) story_id={story_id}"
+    )
     cmd = [
         sys.executable,
         str(SCRIPT_DIR / "extract_char_map.py"),
         "--story-id", story_id,
-        "--text-source", "raw",
+        "--text-source", text_source,
         "--from-chapter", str(from_ch),
         "--to-chapter", str(target),
         "--sample-chapters", str(n_new),
@@ -384,8 +409,8 @@ def _run_lookahead_char_map(
             tail = (result.stderr or result.stdout or "").strip()[-500:]
             log(f"[CHAR_MAP LOOKAHEAD WARN] failed rc={result.returncode}: {tail}")
             return
-        repo.update_story_metadata(story_id, {"char_map_raw_covered_to": target})
-        log(f"[CHAR_MAP LOOKAHEAD] done — raw coverage now ch{target:04d}")
+        repo.update_story_metadata(story_id, {coverage_key: target})
+        log(f"[CHAR_MAP LOOKAHEAD] done — {coverage_key}={target}")
     except Exception as exc:
         log(f"[CHAR_MAP LOOKAHEAD WARN] {type(exc).__name__}: {exc}")
 
@@ -652,6 +677,68 @@ def maybe_auto_update_term_glossary(
             pass
 
 
+_RECAP_PROMPT = """/no_think
+Tóm tắt chương truyện dưới đây trong TỐI ĐA 3 câu tiếng Việt. Tập trung vào:
+nhân vật xuất hiện (và cách họ xưng hô với nhau), sự kiện chính, thuật ngữ/danh xưng mới xuất hiện.
+Chỉ trả về phần tóm tắt, không tiêu đề, không giải thích.
+
+{chapter_text}"""
+
+
+def maybe_update_chapter_recap(
+    job: dict,
+    args: argparse.Namespace,
+    *,
+    slug: str,
+    chapter_number: int,
+    polished_text: str,
+    genre: str,
+) -> None:
+    """Sinh recap <= 3 câu cho chapter vừa polish và lưu vào story memory
+    (recaps.json — atomic, per-story lock). Recap các chương trước được inject
+    vào translate/polish prompt của chương sau để giữ mạch truyện qua chương.
+
+    Never-fail: lỗi LLM/IO chỉ log warning, không fail job. --no-chapter-recap để tắt.
+    """
+    if getattr(args, "no_chapter_recap", False):
+        return
+    story_id = str(job.get("story_id") or "")
+    if not story_id or chapter_number <= 0 or not polished_text.strip():
+        return
+    try:
+        # Cùng convention dir với glossary: story_data/story_memory/{story_id}-{slug}/
+        memory_dir = glossary_path_for(story_id, slug).parent
+        # Bound prompt: đầu + cuối chương đủ cho recap 3 câu.
+        text = polished_text.strip()
+        if len(text) > 4000:
+            text = text[:2800] + "\n[...]\n" + text[-1200:]
+        payload = {
+            "model": str(getattr(args, "judge_model", "") or args.translate_model or "qwen3:14b"),
+            "messages": [{"role": "user", "content": _RECAP_PROMPT.format(chapter_text=text)}],
+            "stream": False,
+            "options": {"temperature": 0, "num_ctx": 4096},
+            "keep_alive": args.keep_alive,
+        }
+        response = requests.post(
+            f"{args.ollama_url.rstrip('/')}/api/chat", json=payload, timeout=args.timeout,
+        )
+        response.raise_for_status()
+        recap = response.json().get("message", {}).get("content", "")
+        recap = re.sub(r"<think>.*?</think>", "", recap, flags=re.DOTALL).strip()
+        # Bound recap: model lan man → cắt cứng, recap chỉ là context block.
+        if len(recap) > 500:
+            recap = recap[:500].rsplit(" ", 1)[0] + "…"
+        if not recap:
+            log(f"[RECAP] ch{chapter_number}: empty recap, skipped")
+            return
+        if save_chapter_recap(memory_dir, chapter_number, recap):
+            log(f"[RECAP] ch{chapter_number}: saved ({len(recap)} chars)")
+        else:
+            log(f"[RECAP WARN] ch{chapter_number}: cannot write recaps.json (lock/fs) — skipped")
+    except Exception as exc:  # noqa: BLE001 — recap là enhancement, không chặn pipeline
+        log(f"[RECAP WARN] ch{chapter_number}: {exc}")
+
+
 class QualityGateError(RuntimeError):
     """Raised when output still has blocking quality issues after all retries.
 
@@ -693,33 +780,25 @@ def _quality_check(
     story_id: str = "",
     slug: str = "",
     story_memory_dir: str = "",
+    source_text: str = "",
+    source_language: str = "",
 ) -> tuple[list[str], list[str]]:
     """Check quality and log. Returns (blocking, warnings).
 
-    Blocking = BLOCKING_QUALITY_ISSUES + story-memory term/name drift (glossary
-    forbidden terms). Register/format drift from story memory chỉ là warning.
+    Thin wrapper quanh run_full_quality_check (shared với CLI scanner) — chỉ thêm
+    worker-style logging.
     """
-    issues = check_polished_quality(text, genre=genre, char_map_path=char_map)
-    blocking = [i for i in issues if any(i.startswith(b) for b in BLOCKING_QUALITY_ISSUES)]
-    warnings = [i for i in issues if i not in blocking]
-
-    # Story-memory QA: glossary forbidden terms / wrong name spellings là blocking.
-    try:
-        memory = load_story_memory(
-            story_memory_dir=story_memory_dir,
-            story_id=story_id,
-            slug=slug,
-            char_map_file=char_map,
-        )
-        if memory.loaded:
-            for issue in find_story_memory_quality_issues(text, memory, genre=genre):
-                if issue.startswith("term/name drift"):
-                    blocking.append(issue)
-                else:
-                    warnings.append(issue)
-    except Exception as exc:  # noqa: BLE001 — memory QA không được làm chết job
-        log(f"[QUALITY] story memory QA error ({label}): {exc}")
-
+    blocking, warnings = run_full_quality_check(
+        text,
+        genre=genre,
+        char_map=char_map,
+        story_id=story_id,
+        slug=slug,
+        story_memory_dir=story_memory_dir,
+        source_text=source_text,
+        source_language=source_language,
+        log=lambda msg: log(f"{msg} ({label})"),
+    )
     if blocking:
         log(f"[QUALITY_FAIL] {label}: {', '.join(blocking)}")
     if warnings:
@@ -737,40 +816,78 @@ def _gated_pass(
     label: str,
     story_id: str = "",
     slug: str = "",
+    source_text: str = "",
+    source_language: str = "",
     cleanup_on_fail: tuple[Path, ...] = (),
 ) -> str:
     """Run an LLM pass with a chapter-level quality gate.
 
     - mode=block (default): re-run toàn bộ pass khi còn blocking issues
       (tối đa --chapter-quality-retries lần); hết retry → QualityGateError,
-      caller KHÔNG ghi DB.
+      caller KHÔNG ghi DB. Mỗi lần re-run nhận repair hints cụ thể từ các
+      blocking issues của lần trước (run_pass(repair_hints)).
     - mode=warn: check + log nhưng vẫn trả text (hành vi cũ).
-    - mode=off: không check.
+    - mode=off: không check deterministic (judge vẫn chạy nếu bật).
+
+    Stage 2 — LLM judge (--llm-judge off|warn|block, default warn): sampled
+    semantic QA, chỉ chạy khi deterministic checks pass. judge=block chỉ có
+    tác dụng re-run khi quality_gate=block (dùng chung retry budget).
 
     Chunk-level retry với repair hints vẫn chạy bên trong run_pass như cũ;
     gate này bắt các lỗi sống sót qua chunk retry (cross-chunk, glossary drift).
     """
     mode = str(getattr(args, "quality_gate", "block") or "block").lower()
+    judge_mode = str(getattr(args, "llm_judge", "warn") or "warn").lower()
     retries = max(0, int(getattr(args, "chapter_quality_retries", 1)))
     attempts = (retries + 1) if mode == "block" else 1
     text = ""
     blocking: list[str] = []
+    repair_hints = ""
     for attempt in range(1, attempts + 1):
-        run_pass()
+        run_pass(repair_hints)
         text = read_output()
-        if mode == "off":
+        if mode == "off" and judge_mode == "off":
             return text
-        blocking, _ = _quality_check(
-            text,
-            genre,
-            char_map,
-            label,
-            story_id=story_id,
-            slug=slug,
-            story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
-        )
+        if mode == "off":
+            blocking = []
+        else:
+            blocking, _ = _quality_check(
+                text,
+                genre,
+                char_map,
+                label,
+                story_id=story_id,
+                slug=slug,
+                story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+                source_text=source_text,
+                source_language=source_language,
+            )
+
+        # Stage 2: LLM judge — chỉ khi deterministic pass, tránh tốn call vô ích.
+        if not blocking and judge_mode != "off" and source_text:
+            judge = judge_chapter_quality(
+                source_text,
+                text,
+                genre=genre,
+                ollama_url=args.ollama_url,
+                model=str(getattr(args, "judge_model", "") or args.translate_model or "qwen3:14b"),
+                num_ctx=int(getattr(args, "num_ctx", 8192) or 8192),
+                timeout=int(getattr(args, "timeout", 600) or 600),
+                seed=label,
+                attempt=attempt - 1,
+            )
+            if judge.warnings:
+                log(f"[JUDGE_WARN] {label}: {', '.join(judge.warnings)}")
+            if judge.issues:
+                if judge_mode == "block":
+                    blocking = list(judge.issues)
+                    log(f"[JUDGE_FAIL] {label}: {', '.join(judge.issues)}")
+                else:
+                    log(f"[JUDGE_WARN] {label} (major, warn-only): {', '.join(judge.issues)}")
+
         if not blocking or mode != "block":
             return text
+        repair_hints = "\n".join(f"- {issue_to_repair_hint(i)}" for i in blocking)
         if attempt < attempts:
             log(f"[QUALITY_GATE] {label}: re-run {attempt}/{retries} — {', '.join(blocking)}")
     # Xóa output hỏng trên disk — nếu để lại, lần retry job sau sẽ dính nhánh
@@ -930,6 +1047,15 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
 
     maybe_translate_story_metadata(job, args)
 
+    # Source text cho completeness check trong quality gate (length ratio /
+    # structure drift — warning-only). Strip noise giống translate pass để ratio
+    # so trên cùng nội dung thực.
+    try:
+        gate_source_text = clean_source_noise(input_path.read_text(encoding="utf-8")).strip()
+    except Exception as exc:  # noqa: BLE001 — completeness là enhancement
+        log(f"[QUALITY] cannot read source for completeness check: {exc}")
+        gate_source_text = ""
+
     # Auto-resolve char map: payload > --char-map-file arg > convention-based lookup
     story_id = str(job.get("story_id") or "")
     job_slug = story_slug_for_job(job, input_path)
@@ -942,20 +1068,27 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     current_chapter = int(payload.get("chapter_number") or 0)
     # Pre-resolve genre from DB only (no char_map yet) so auto-create can inject genre header
     pre_genre = resolve_genre(job, char_map_file="")
-    if raw_language == "vi" or effective_char_map:
-        effective_char_map = maybe_auto_update_char_map(
-            job,
-            args,
-            slug=job_slug,
-            current_chapter=current_chapter,
-            existing_char_map=effective_char_map,
-            text_source=char_map_text_source,
-            genre=pre_genre,
-        )
+    effective_char_map = maybe_auto_update_char_map(
+        job,
+        args,
+        slug=job_slug,
+        current_chapter=current_chapter,
+        existing_char_map=effective_char_map,
+        text_source=char_map_text_source,
+        genre=pre_genre,
+    )
     if effective_char_map:
         log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
+        try:
+            cm_issues = validate_char_map(load_char_map(effective_char_map, story_id))
+            if cm_issues:
+                shown = ", ".join(cm_issues[:8])
+                more = f" (+{len(cm_issues) - 8} more)" if len(cm_issues) > 8 else ""
+                log(f"[CHARMAP_WARN] {len(cm_issues)} issue(s): {shown}{more}")
+        except Exception as exc:  # noqa: BLE001 — validation chỉ là cảnh báo
+            log(f"[CHARMAP_WARN] validate error: {exc}")
 
-    # Lookahead: pre-extract raw characters N chapters ahead so the char-map is
+    # Lookahead: pre-extract characters N chapters ahead so the char-map is
     # already populated when those chapters are translated (sliding window, 1 new
     # chapter per call → minimal overhead). Runs only if char_map already exists.
     if effective_char_map and current_chapter > 0:
@@ -966,6 +1099,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             char_map_path=effective_char_map,
             slug=job_slug,
             genre=pre_genre,
+            text_source=char_map_text_source,
         )
 
     genre = resolve_genre(job, effective_char_map)
@@ -991,6 +1125,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 story_id=story_id,
                 slug=job_slug,
                 story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+                source_text=gate_source_text,
+                source_language=raw_language,
             )
         if existing_blocking:
             log(f"[QUALITY_GATE] existing output failed check → re-running pass: {output_path}")
@@ -1017,12 +1153,28 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             )
             if existing_translated:
                 maybe_update_translated_chapter_title(job, existing_translated)
+            # Codex finding 3: nếu recap chưa có (worker crash sau write text nhưng trước recap),
+            # backfill từ existing_polished trước khi complete job.
+            maybe_update_chapter_recap(
+                job,
+                args,
+                slug=job_slug,
+                chapter_number=current_chapter,
+                polished_text=existing_polished,
+                genre=genre,
+            )
             repo.complete_story_job(job["id"], result_payload={"skipped": "output_exists"})
             return
 
-    def _build_args_with_char_map(model: str, max_chars: int, genre: str = "") -> Namespace:
+    def _build_args_with_char_map(
+        model: str, max_chars: int, genre: str = "", repair_hints: str = ""
+    ) -> Namespace:
         ns = build_args(args, model, max_chars, genre, story_id=story_id, story_slug=job_slug)
         ns.char_map_file = effective_char_map
+        ns.chapter_repair_hints = repair_hints
+        # Cho story memory chọn recap các chương < current (continuity qua chương).
+        # --no-chapter-recap tắt cả inject (current_chapter=0 → bỏ recap block).
+        ns.current_chapter = 0 if getattr(args, "no_chapter_recap", False) else current_chapter
         return ns
 
     if raw_language == "vi":
@@ -1030,10 +1182,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         max_chars = int(payload.get("polish_max_chars_per_chunk") or args.polish_max_chars_per_chunk)
         _check_resources(args, label="polish")
         polished_text_content = _gated_pass(
-            lambda: polish_file(
+            lambda hints: polish_file(
                 input_path,
                 output_path,
-                _build_args_with_char_map(model, max_chars, genre),
+                _build_args_with_char_map(model, max_chars, genre, hints),
             ),
             lambda: _fix_pronouns_for_genre(
                 read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
@@ -1044,6 +1196,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"vi ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            source_text=gate_source_text,
+            source_language="vi",
             cleanup_on_fail=(output_path,),
         )
         repo.update_chapter_text_outputs(
@@ -1056,10 +1210,14 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         single_pass_max_chars = int(payload.get("translate_max_chars_per_chunk") or args.single_pass_max_chars_per_chunk)
         translate_model = job.get("model") or args.translate_model
         _check_resources(args, label="translate")
-        sp_args = _build_args_with_char_map(translate_model, single_pass_max_chars, genre)
-        sp_args.num_ctx = args.single_pass_num_ctx
+
+        def _single_pass_run(hints: str) -> None:
+            sp_args = _build_args_with_char_map(translate_model, single_pass_max_chars, genre, hints)
+            sp_args.num_ctx = args.single_pass_num_ctx
+            single_pass_translate_polish_file(input_path, output_path, sp_args)
+
         polished_text_content = _gated_pass(
-            lambda: single_pass_translate_polish_file(input_path, output_path, sp_args),
+            _single_pass_run,
             lambda: _fix_pronouns_for_genre(
                 read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
             ),
@@ -1069,6 +1227,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"single-pass ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            source_text=gate_source_text,
+            source_language=raw_language,
             cleanup_on_fail=(output_path,),
         )
         repo.update_chapter_text_outputs(
@@ -1108,10 +1268,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         # fail sớm, không tốn polish pass. DB write của translated DỜI xuống sau
         # khi polished cũng pass gate — chapter fail không ghi gì vào DB.
         translated_text_content = _gated_pass(
-            lambda: translate_file(
+            lambda hints: translate_file(
                 input_path,
                 translated_path,
-                _build_args_with_char_map(translate_model, translate_max_chars, genre),
+                _build_args_with_char_map(translate_model, translate_max_chars, genre, hints),
             ),
             lambda: _fix_pronouns_for_genre(
                 read_formatted_output(translated_path, job, write_back=True, label="translated"),
@@ -1124,6 +1284,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             label=f"translate ch{current_chapter}",
             story_id=story_id,
             slug=job_slug,
+            source_text=gate_source_text,
+            source_language=raw_language,
             cleanup_on_fail=(translated_path,),
         )
         translated_chapter_title = maybe_update_translated_chapter_title(job, translated_text_content)
@@ -1141,7 +1303,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         genre = resolve_genre(job, effective_char_map)
         mode = post_translate_mode(job, args)
         if mode == "copy":
-            def _copy_pass() -> None:
+            def _copy_pass(_hints: str = "") -> None:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_text(clean_for_audiobook_tts(translated_text_content).strip() + "\n", encoding="utf-8")
                 log(f"[COPY] translated output reused as polished output: {output_path}")
@@ -1160,6 +1322,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 label=f"copy ch{current_chapter}",
                 story_id=story_id,
                 slug=job_slug,
+                source_text=gate_source_text,
+                source_language=raw_language,
                 cleanup_on_fail=(output_path, translated_path) if no_save else (output_path,),
             )
         else:
@@ -1168,10 +1332,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 unload_ollama_model(args.ollama_url, translate_model)
             _check_resources(args, label="polish", unloaded_model=translate_model if translate_model != args.vi_model else "")
             polished_text_content = _gated_pass(
-                lambda: polish_file(
+                lambda hints: polish_file(
                     translated_path,
                     output_path,
-                    _build_args_with_char_map(args.vi_model, polish_max_chars, genre),
+                    _build_args_with_char_map(args.vi_model, polish_max_chars, genre, hints),
                 ),
                 lambda: _fix_pronouns_for_genre(
                     read_formatted_polished_output(output_path, job, write_back=True), genre, output_path,
@@ -1182,6 +1346,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 label=f"two-pass ch{current_chapter}",
                 story_id=story_id,
                 slug=job_slug,
+                source_text=gate_source_text,
+                source_language=raw_language,
                 cleanup_on_fail=(output_path, translated_path) if no_save else (output_path,),
             )
         # Discard temp translated file only after polish finishes reading it.
@@ -1207,6 +1373,15 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             slug=job_slug,
             genre=genre,
             args=args,
+        )
+        # Rolling recap: chương sau sẽ thấy tóm tắt chương này trong prompt.
+        maybe_update_chapter_recap(
+            job,
+            args,
+            slug=job_slug,
+            chapter_number=current_chapter,
+            polished_text=polished_text_content,
+            genre=genre,
         )
 
     repo.complete_story_job(
@@ -1273,8 +1448,16 @@ def main() -> None:
                         help="Chapter-level quality gate trước khi ghi DB. block: còn blocking issues sau retries → fail job, KHÔNG ghi DB (default). warn: chỉ log, vẫn ghi (hành vi cũ). off: không check.")
     parser.add_argument("--chapter-quality-retries", type=int, default=1,
                         help="Số lần re-run TOÀN BỘ pass (translate/polish) khi chapter fail quality gate. Default: 1.")
+    parser.add_argument("--llm-judge", choices=("off", "warn", "block"), default="warn",
+                        help="LLM judge (sampled semantic QA) sau khi deterministic checks pass. "
+                             "warn: log major issues, vẫn ghi DB (default — đang calibrate). "
+                             "block: re-run pass với repair hints, chỉ có tác dụng khi --quality-gate block. off: tắt.")
+    parser.add_argument("--judge-model", default="",
+                        help="Model cho LLM judge. Mặc định dùng --translate-model.")
     parser.add_argument("--no-auto-glossary", action="store_true",
                         help="Tắt auto seed/update terminology glossary (story memory).")
+    parser.add_argument("--no-chapter-recap", action="store_true",
+                        help="Tắt rolling recap (tóm tắt chương trước inject vào prompt chương sau).")
     parser.add_argument("--glossary-update-interval", type=int, default=20,
                         help="Incremental glossary update mỗi N chapters. Default: 20.")
     parser.add_argument("--prompt-profile", choices=("fast", "full"), default="full")
