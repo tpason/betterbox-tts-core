@@ -954,6 +954,11 @@ def build_story_memory_prompt(
 def _forbidden_surfaces(memory: StoryMemory) -> list[tuple[str, str]]:
     surfaces: list[tuple[str, str]] = []
     for wrong, correct in memory.replacements.items():
+        # Skip case-only differences: replacement already corrects them silently;
+        # the quality gate uses case-insensitive patterns so it would flag the
+        # *correct* form too, causing false positives that block every chapter.
+        if _normalize_key(wrong) == _normalize_key(correct):
+            continue
         surfaces.append((wrong, f"nên là {correct}"))
     for char in memory.characters:
         name = str(char.get("canonical_name") or char.get("name") or char.get("id") or "nhân vật")
@@ -966,6 +971,8 @@ def _forbidden_surfaces(memory: StoryMemory) -> list[tuple[str, str]]:
         reason = f"thuật ngữ nên là {canonical}" if canonical else "thuật ngữ bị cấm"
         for key in ("wrong_translations", "wrong_terms", "forbidden", "forbidden_literal"):
             for value in _string_list(item.get(key)):
+                if canonical and _normalize_key(value) == _normalize_key(canonical):
+                    continue  # case-only diff — silently corrected, not a quality failure
                 surfaces.append((value, reason))
     return [(s, r) for s, r in surfaces if s]
 
