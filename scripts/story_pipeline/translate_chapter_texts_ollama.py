@@ -465,7 +465,6 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
         slug=story_slug,
         char_map_file=char_map_file,
     )
-    story_memory = apply_seed_glossary_replacements(story_memory, genre)
     aliases = parse_aliases(char_map) if char_map else {}
     if aliases:
         normalized = apply_aliases(raw_text, aliases)
@@ -476,6 +475,7 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
     if memory_normalized != raw_text:
         print("[STORY_MEMORY] Đã chuẩn hóa tên/thuật ngữ theo story memory")
         raw_text = memory_normalized
+    story_memory = apply_seed_glossary_replacements(story_memory, genre)
 
     chunks = split_text(raw_text, args.max_chars_per_chunk)
     char_map_note = f", char_map={'yes' if char_map else 'no'}"
@@ -792,7 +792,6 @@ def single_pass_translate_polish_file(
         slug=story_slug,
         char_map_file=char_map_file,
     )
-    story_memory = apply_seed_glossary_replacements(story_memory, genre)
     aliases = parse_aliases(char_map) if char_map else {}
     if aliases:
         normalized = apply_aliases(raw_text, aliases)
@@ -803,6 +802,7 @@ def single_pass_translate_polish_file(
     if memory_normalized != raw_text:
         print("[STORY_MEMORY] Đã chuẩn hóa tên/thuật ngữ theo story memory")
         raw_text = memory_normalized
+    story_memory = apply_seed_glossary_replacements(story_memory, genre)
 
     max_chars = getattr(args, "max_chars_per_chunk", 2000)
     num_ctx = getattr(args, "num_ctx", 6144)

@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+from argparse import Namespace
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -16,6 +18,7 @@ from check_translation_quality import (  # noqa: E402
     _has_repeated_content,
     check_completeness,
     issue_to_repair_hint,
+    run_full_quality_check,
     split_blocking_warnings,
 )
 
@@ -102,12 +105,28 @@ def test_completeness() -> None:
 def test_blocking_split_and_hints() -> None:
     print("\n[split_blocking_warnings + repair hints]")
     blocking, warnings = split_blocking_warnings(
-        ["not_vietnamese", "length_ratio_low:0.45<0.75", "structure_drift:paragraphs:3/12", "wrong_pronoun:5"]
+        [
+            "not_vietnamese",
+            "output_too_short",
+            "length_ratio_low:0.45<0.75",
+            "structure_drift:paragraphs:3/12",
+            "wrong_pronoun:5",
+        ]
     )
-    check("not_vietnamese + wrong_pronoun blocking", blocking == ["not_vietnamese", "wrong_pronoun:5"])
+    check(
+        "not_vietnamese + output_too_short + wrong_pronoun blocking",
+        blocking == ["not_vietnamese", "output_too_short", "wrong_pronoun:5"],
+    )
     check(
         "length_ratio_low + structure_drift là warnings",
         warnings == ["length_ratio_low:0.45<0.75", "structure_drift:paragraphs:3/12"],
+    )
+    short_blocking, short_warnings = run_full_quality_check("ngắn", genre="western_fantasy")
+    check("output_too_short block chapter gate", short_blocking == ["output_too_short"])
+    check("output_too_short không còn warning-only", short_warnings == [])
+    check(
+        "hint output_too_short nhắc output quá ngắn",
+        "quá ngắn" in issue_to_repair_hint("output_too_short"),
     )
     check(
         "hint length_ratio_low nhắc dịch đầy đủ",
@@ -301,6 +320,60 @@ def test_seed_glossary_and_terms() -> None:
     ], min_count=3)
     check("bracket term một lần vẫn được mine", any(c["term"] == "Nine Yang True Fire Seal" for c in candidates))
     check("bracket term được đánh dấu", any(c.get("is_bracketed") for c in candidates))
+
+    import translate_chapter_texts_ollama as trans
+
+    captured: dict[str, str] = {}
+    original_call = trans.call_ollama
+    original_sync = trans._sync_translated_to_db
+
+    def fake_call_ollama(**kwargs):
+        captured["source"] = kwargs["text"]
+        return (
+            "Đây là đoạn văn tiếng Việt đủ dài để kiểm tra rằng thuật ngữ Magic "
+            "được chuẩn hóa sau khi dịch, không phải trước khi gửi source vào model. "
+            "Nhân vật bước vào hầm ngục và tiếp tục cuộc hành trình."
+        )
+
+    try:
+        trans.call_ollama = fake_call_ollama
+        trans._sync_translated_to_db = lambda *_args, **_kwargs: None
+        with tempfile.TemporaryDirectory() as tmp:
+            input_path = Path(tmp) / "chapter0001.txt"
+            output_path = Path(tmp) / "out.txt"
+            input_path.write_text(
+                "The Magic Warrior entered the Dungeon and raised his sword. " * 5,
+                encoding="utf-8",
+            )
+            trans.translate_file(
+                input_path,
+                output_path,
+                Namespace(
+                    char_map_file="",
+                    genre="western_fantasy",
+                    story_id="",
+                    story_slug="seed-order-test",
+                    story_memory_dir="",
+                    max_chars_per_chunk=2000,
+                    max_quality_retries=0,
+                    chapter_repair_hints="",
+                    current_chapter=1,
+                    ollama_url="http://127.0.0.1:11434",
+                    model="mock",
+                    temperature=0,
+                    num_ctx=1024,
+                    timeout=1,
+                    retries=1,
+                    keep_alive="0",
+                    fail_on_story_memory_issues=False,
+                ),
+            )
+            output_text = output_path.read_text(encoding="utf-8")
+        check("seed không sửa raw source trước translate", "Magic Warrior" in captured.get("source", ""))
+        check("seed vẫn normalize output sau translate", "Ma Thuật" in output_text)
+    finally:
+        trans.call_ollama = original_call
+        trans._sync_translated_to_db = original_sync
 
 
 def test_untranslated_slang_warning() -> None:

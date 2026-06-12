@@ -1068,15 +1068,21 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     current_chapter = int(payload.get("chapter_number") or 0)
     # Pre-resolve genre from DB only (no char_map yet) so auto-create can inject genre header
     pre_genre = resolve_genre(job, char_map_file="")
-    effective_char_map = maybe_auto_update_char_map(
-        job,
-        args,
-        slug=job_slug,
-        current_chapter=current_chapter,
-        existing_char_map=effective_char_map,
-        text_source=char_map_text_source,
-        genre=pre_genre,
-    )
+    if effective_char_map or char_map_text_source == "raw":
+        effective_char_map = maybe_auto_update_char_map(
+            job,
+            args,
+            slug=job_slug,
+            current_chapter=current_chapter,
+            existing_char_map=effective_char_map,
+            text_source=char_map_text_source,
+            genre=pre_genre,
+        )
+    else:
+        log(
+            "[CHAR_MAP] skip pre-translate seed create: "
+            f"text_source={char_map_text_source} has no DB rows before translation"
+        )
     if effective_char_map:
         log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
         try:

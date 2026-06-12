@@ -75,6 +75,7 @@ def is_probably_vietnamese(text: str) -> bool:
 # Issues in this set trigger automatic re-polish/re-translate retry.
 BLOCKING_QUALITY_ISSUES: frozenset[str] = frozenset({
     "not_vietnamese",
+    "output_too_short",
     "cjk_not_translated",
     "repeated_content",
     "large_en_block",
@@ -113,6 +114,8 @@ def issue_to_repair_hint(issue: str) -> str:
     base = issue.split(":")[0]
     if base == "not_vietnamese":
         return "Toàn bộ output phải bằng tiếng Việt — không để lại nội dung bằng ngôn ngữ khác."
+    if base == "output_too_short":
+        return "Output quá ngắn hoặc rỗng — dịch/viết lại đầy đủ toàn bộ nội dung, không bỏ đoạn."
     if base == "cjk_not_translated":
         return "Còn ký tự tiếng Trung/Hàn chưa dịch — dịch toàn bộ sang tiếng Việt tự nhiên."
     if base == "repeated_content":
