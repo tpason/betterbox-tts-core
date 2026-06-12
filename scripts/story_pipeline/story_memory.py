@@ -507,6 +507,128 @@ def apply_story_memory_replacements(text: str, memory: StoryMemory) -> str:
     return result
 
 
+def apply_story_memory_replacements_tracked(
+    text: str, memory: StoryMemory
+) -> tuple[str, dict[str, str]]:
+    """Like apply_story_memory_replacements but also returns corrections actually made.
+
+    Returns (corrected_text, {wrong_string: correct_string}).
+    The corrections dict drives auto_update_wrong_translations for self-learning.
+    """
+    if not text or not memory.replacements:
+        return text, {}
+    result = text
+    corrections: dict[str, str] = {}
+    for surface, replacement in sorted(memory.replacements.items(), key=lambda kv: len(kv[0]), reverse=True):
+        surface_s, repl_s = str(surface), str(replacement)
+        if not surface_s or not repl_s or _normalize_key(surface_s) == _normalize_key(repl_s):
+            continue
+        if _name_boundary_pattern(surface_s).search(result):
+            corrections[surface_s] = repl_s
+        result = _replace_surface(result, surface_s, repl_s)
+    return result, corrections
+
+
+def auto_update_wrong_translations(
+    memory: StoryMemory,
+    corrections: dict[str, str],
+) -> int:
+    """Add newly observed wrong translations to the story glossary (self-learning).
+
+    For each (wrong, correct) in corrections: if wrong is not already listed in the
+    matching glossary entry's wrong_translations, append it. Writes atomically.
+    Returns count of new strings added.
+    """
+    if not corrections or not memory.directory:
+        return 0
+    glossary_path = _resolve(memory.directory / "glossary.json")
+    if not glossary_path.exists():
+        return 0
+
+    try:
+        import fcntl
+        import os as _os
+        import tempfile as _tempfile
+    except ImportError:
+        return 0
+
+    lock_path = glossary_path.with_suffix(".json.lock")
+    added = 0
+    try:
+        with open(lock_path, "w", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                items = json.loads(glossary_path.read_text(encoding="utf-8").strip() or "[]")
+            except (json.JSONDecodeError, OSError):
+                return 0
+            if not isinstance(items, list):
+                return 0
+
+            canonical_idx: dict[str, int] = {}
+            for i, item in enumerate(items):
+                c = str(item.get("canonical_vi") or item.get("vi") or item.get("canonical") or "").strip()
+                if c:
+                    canonical_idx[_normalize_key(c)] = i
+
+            modified = False
+            for wrong, correct in corrections.items():
+                idx = canonical_idx.get(_normalize_key(correct))
+                if idx is None:
+                    continue
+                item = items[idx]
+                existing = {
+                    _normalize_key(s)
+                    for key in ("wrong_translations", "wrong_terms", "forbidden", "forbidden_literal")
+                    for s in _string_list(item.get(key) or [])
+                }
+                if _normalize_key(wrong) in existing:
+                    continue
+                wt: list[str] = list(item.get("wrong_translations") or [])
+                wt.append(wrong)
+                item["wrong_translations"] = wt
+                added += 1
+                modified = True
+
+            if modified:
+                fd, tmp = _tempfile.mkstemp(dir=str(glossary_path.parent), suffix=".tmp")
+                try:
+                    with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(items, f, ensure_ascii=False, indent=2)
+                    _os.replace(tmp, str(glossary_path))
+                except BaseException:
+                    try:
+                        _os.unlink(tmp)
+                    except OSError:
+                        pass
+                    raise
+    except OSError:
+        return 0
+
+    return added
+
+
+def find_story_memory_priority_violations(text: str, memory: StoryMemory) -> list[str]:
+    """Scan raw LLM output (BEFORE apply_replacements) for priority glossary violations.
+
+    Returns hint strings suitable for injecting into repair prompts.
+    Only checks glossary items with priority=True to avoid noise.
+    """
+    if not text or not memory.glossary:
+        return []
+    hints: list[str] = []
+    for item in memory.glossary:
+        if not item.get("priority"):
+            continue
+        canonical = str(item.get("canonical_vi") or item.get("vi") or "").strip()
+        if not canonical:
+            continue
+        for key in ("wrong_translations", "forbidden", "forbidden_literal"):
+            for surface in _string_list(item.get(key)):
+                if surface and _name_boundary_pattern(surface).search(text):
+                    hints.append(f"- `{surface}` → phải là `{canonical}`")
+    return list(dict.fromkeys(hints))
+
+
 def _entry_surfaces(entry: dict[str, Any]) -> list[str]:
     surfaces: list[str] = []
     for key in (
@@ -862,6 +984,12 @@ def find_story_memory_quality_issues(text: str, memory: StoryMemory, *, genre: s
             issues.append("term drift: `thuyền trưởng` trong non-naval context; captain quân sự cần dịch theo chức vụ")
         if re.search(r'"[^"\n]{0,120}\b[Bb]ạn\b[^"\n]{0,120}"', text):
             issues.append("dialogue register: lời thoại có `bạn`, dễ là dấu máy dịch trong western fantasy")
+
+    if genre == "korean_cultivation":
+        if re.search(r'"[^"\n]{0,120}\b[Bb]ạn\b[^"\n]{0,120}"', text):
+            issues.append("dialogue register: lời thoại có `bạn`, dễ là dấu máy dịch trong Korean cultivation; ưu tiên tôi/cậu hoặc ngươi/tên kia theo scene")
+        if re.search(r"\b(ngươi|mi)\b", text, flags=re.IGNORECASE) and re.search(r"\b(công ty|giám đốc|trưởng phòng|đồng nghiệp|văn phòng)\b", text, flags=re.IGNORECASE):
+            issues.append("register drift: cảnh hiện đại/công sở không nên dùng ngươi/mi")
 
     if re.search(r"(?m)^\"\s*$|^\s*\"\s+", text):
         issues.append("format drift: dấu ngoặc kép bị tách dòng bất thường")

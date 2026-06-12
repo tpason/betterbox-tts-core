@@ -39,6 +39,8 @@ except ImportError:
 from story_memory import (
     apply_seed_glossary_replacements,
     apply_story_memory_replacements,
+    apply_story_memory_replacements_tracked,
+    auto_update_wrong_translations,
     build_story_memory_prompt,
     find_story_memory_quality_issues,
     load_story_memory,
@@ -983,7 +985,11 @@ def polish_file(input_path: Path, output_path: Path, args: argparse.Namespace) -
             preceding_context = _tail_context(polished or "")
 
     final_text = "\n\n".join(polished_chunks)
-    final_text = apply_story_memory_replacements(final_text, story_memory)
+    final_text, polish_corrections = apply_story_memory_replacements_tracked(final_text, story_memory)
+    if polish_corrections:
+        n_new = auto_update_wrong_translations(story_memory, polish_corrections)
+        if n_new:
+            print(f"[GLOSSARY_LEARN] {input_path.name}: {n_new} new wrong_translation(s) added to glossary")
     final_text = clean_for_audiobook_tts(final_text)
     final_text = format_reader_polished_content(final_text, {})
 

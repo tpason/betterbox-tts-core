@@ -391,6 +391,42 @@ def split_blocking_warnings(issues: list[str]) -> tuple[list[str], list[str]]:
     return blocking, warnings
 
 
+def check_raw_story_memory_forbidden(
+    raw_llm_text: str,
+    story_memory_dir: str = "",
+    story_id: str = "",
+    slug: str = "",
+    char_map_file: str = "",
+    genre: str = "",
+) -> list[str]:
+    """Check raw LLM output (BEFORE apply_story_memory_replacements) for priority
+    glossary violations. Returns repair hint strings, empty list = OK.
+
+    Dùng trong chunk retry loop: nếu priority violations tìm thấy,
+    inject hints vào repair prompt để LLM tự sửa thay vì chỉ fix post-hoc.
+    Không import này nếu không cần — hàm lazy-load story_memory.
+    """
+    if not raw_llm_text:
+        return []
+    try:
+        from story_memory import (
+            apply_seed_glossary_replacements,
+            find_story_memory_priority_violations,
+            load_story_memory,
+        )
+        memory = load_story_memory(
+            story_memory_dir=story_memory_dir,
+            story_id=story_id,
+            slug=slug,
+            char_map_file=char_map_file,
+        )
+        if genre:
+            memory = apply_seed_glossary_replacements(memory, genre)
+        return find_story_memory_priority_violations(raw_llm_text, memory)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def run_full_quality_check(
     text: str,
     *,

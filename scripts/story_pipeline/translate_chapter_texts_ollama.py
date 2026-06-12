@@ -24,7 +24,10 @@ from genre_prompts import (
 from story_memory import (
     apply_seed_glossary_replacements,
     apply_story_memory_replacements,
+    apply_story_memory_replacements_tracked,
+    auto_update_wrong_translations,
     build_story_memory_prompt,
+    find_story_memory_priority_violations,
     find_story_memory_quality_issues,
     load_story_memory,
     story_memory_status,
@@ -505,7 +508,7 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
             translated = ""
             repair_hints_for_chunk = chapter_hints
             for q_attempt in range(max_quality_retries + 1):
-                translated = call_ollama(
+                raw_translated = call_ollama(
                     base_url=args.ollama_url,
                     model=args.model,
                     text=chunk,
@@ -521,7 +524,18 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
                     session=session,
                     repair_hints=repair_hints_for_chunk,
                 )
-                translated = apply_story_memory_replacements(translated, story_memory)
+
+                # Check priority glossary violations on raw output → add to retry hints
+                # (after replacement they'd be fixed, but we want the model to learn)
+                if story_memory.glossary and q_attempt < max_quality_retries:
+                    priority_hints = find_story_memory_priority_violations(raw_translated, story_memory)
+                    if priority_hints:
+                        print(f"[GLOSSARY_RETRY] chunk {idx}/{len(chunks)} attempt {q_attempt + 1}: {len(priority_hints)} term violation(s)")
+                        glossary_hint = "Thuật ngữ sai phải sửa:\n" + "\n".join(priority_hints[:8])
+                        repair_hints_for_chunk = "\n".join(filter(None, [repair_hints_for_chunk, glossary_hint]))
+                        continue
+
+                translated = apply_story_memory_replacements(raw_translated, story_memory)
 
                 if output_too_short(chunk, translated):
                     src_len = len(re.sub(r"\s+", "", chunk))
@@ -550,7 +564,12 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
             preceding_context = _tail_context(translated)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    final_text = apply_story_memory_replacements("\n\n".join(translated_chunks).strip(), story_memory)
+    final_joined = "\n\n".join(translated_chunks).strip()
+    final_text, all_corrections = apply_story_memory_replacements_tracked(final_joined, story_memory)
+    if all_corrections:
+        n_new = auto_update_wrong_translations(story_memory, all_corrections)
+        if n_new:
+            print(f"[GLOSSARY_LEARN] {input_path.name}: {n_new} new wrong_translation(s) added to glossary")
     warn_addressing_quality(final_text, input_path.name)
     memory_issues = find_story_memory_quality_issues(final_text, story_memory, genre=genre)
     if memory_issues:
@@ -863,10 +882,14 @@ def single_pass_translate_polish_file(
             preceding_vi_context = _tail_context(output)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    final_text = apply_story_memory_replacements(
+    final_text, sp_corrections = apply_story_memory_replacements_tracked(
         clean_for_audiobook_tts("\n\n".join(polished_chunks).strip()),
         story_memory,
     )
+    if sp_corrections:
+        n_new = auto_update_wrong_translations(story_memory, sp_corrections)
+        if n_new:
+            print(f"[GLOSSARY_LEARN] {input_path.name}: {n_new} new wrong_translation(s) added to glossary")
     warn_addressing_quality(final_text, input_path.name)
     memory_issues = find_story_memory_quality_issues(final_text, story_memory, genre=genre)
     if memory_issues:
