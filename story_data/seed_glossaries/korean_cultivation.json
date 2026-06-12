@@ -212,5 +212,310 @@
     "canonical_vi": "Võ Tài",
     "kind": "other",
     "wrong_translations": ["Tài Năng Bẩm Sinh", "Martial Talent"]
+  },
+  {
+    "source_terms": ["True Qi", "True Energy", "진기", "眞氣", "참기운"],
+    "canonical_vi": "Chân Khí",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Khí Thật", "Năng Lượng Thật", "Năng Lượng Thực", "True Energy", "True Qi"],
+    "meaning": "năng lượng tu luyện tinh thuần — khác Nội Công ở chỗ đã qua tịnh hóa"
+  },
+  {
+    "source_terms": ["Blood Qi", "Blood Energy", "혈기", "血氣", "Blood Ki"],
+    "canonical_vi": "Huyết Khí",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Khí Máu", "Năng Lượng Máu", "Huyết Lực", "Blood Energy"]
+  },
+  {
+    "source_terms": ["Divine Sense", "Spiritual Sense", "Spiritual Consciousness", "신식", "神識", "정신력", "精神力"],
+    "canonical_vi": "Thần Thức",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Giác Quan Thần", "Cảm Giác Tinh Thần", "Ý Thức Tinh Thần", "Thức Thần", "Thần Nhận Thức", "Divine Sense"],
+    "meaning": "giác quan tinh thần mở rộng của tu sĩ — không phải giác quan thể xác"
+  },
+  {
+    "source_terms": ["Spirit Stone", "Spiritual Stone", "영석", "靈石", "Energy Stone"],
+    "canonical_vi": "Linh Thạch",
+    "kind": "item",
+    "priority": true,
+    "wrong_translations": ["Đá Tinh Thần", "Đá Linh Hồn", "Đá Thần", "Đá Năng Lượng", "Spirit Stone", "Spiritual Stone"]
+  },
+  {
+    "source_terms": ["Spirit Pill", "Elixir", "Cultivation Pill", "영단", "靈丹", "단약", "丹藥"],
+    "canonical_vi": "Linh Đan",
+    "kind": "item",
+    "priority": true,
+    "wrong_translations": ["Thuốc Thần", "Viên Tinh Thần", "Linh Thuốc", "Elixir", "Spirit Pill", "Cultivation Pill"],
+    "variants": ["Đan Dược (viết tắt)", "Kim Đan nếu source là Golden Core Pill"]
+  },
+  {
+    "source_terms": ["Formation", "Array", "Spell Formation", "진법", "陣法", "마법진", "魔法陣"],
+    "canonical_vi": "Trận Pháp",
+    "kind": "technique",
+    "priority": true,
+    "wrong_translations": ["Mảng/Hình Thành", "Đội Hình Phép Thuật", "Formation", "Array"],
+    "variants": ["Pháp Trận (thứ tự đảo)", "Huyền Trận nếu source nhấn bí ẩn"]
+  },
+  {
+    "source_terms": ["Body Technique", "Movement Technique", "신법", "身法", "보법", "步法"],
+    "canonical_vi": "Thân Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Cơ Thể", "Phương Pháp Di Chuyển", "Body Technique", "Movement Technique"],
+    "variants": ["Bộ Pháp nếu source chỉ footwork/steps"]
+  },
+  {
+    "source_terms": ["Palm Technique", "Palm Art", "Palm Strike", "장법", "掌法", "장기", "掌氣"],
+    "canonical_vi": "Chưởng Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Lòng Bàn Tay", "Nghệ Thuật Cú Đánh", "Palm Technique", "Palm Strike"]
+  },
+  {
+    "source_terms": ["Fist Technique", "Fist Art", "권법", "拳法", "권기", "拳氣"],
+    "canonical_vi": "Quyền Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Nắm Đấm", "Phương Pháp Quyền", "Fist Technique", "Fist Art"]
+  },
+  {
+    "source_terms": ["Spear Technique", "Spear Art", "창법", "槍法"],
+    "canonical_vi": "Thương Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Giáo", "Phương Pháp Giáo", "Spear Technique"]
+  },
+  {
+    "source_terms": ["Saber Technique", "Blade Art", "도법", "刀法"],
+    "canonical_vi": "Đao Pháp",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật Đao", "Nghệ Thuật Lưỡi", "Saber Technique"]
+  },
+  {
+    "source_terms": ["Talisman", "Seal", "부적", "符籙", "符咒"],
+    "canonical_vi": "Phù Lục",
+    "kind": "item",
+    "wrong_translations": ["Bùa", "Bùa Chú", "Ấn", "Talisman"],
+    "variants": ["Phù Chú (nếu source = magic charm)", "Ấn (nếu source = seal/stamp)"]
+  },
+  {
+    "source_terms": ["Artifact", "Magic Weapon", "Magic Tool", "영기", "靈器", "법보", "法寶"],
+    "canonical_vi": "Pháp Bảo",
+    "kind": "item",
+    "wrong_translations": ["Vũ Khí Ma Thuật", "Vũ Khí Thần Kỳ", "Công Cụ Thần", "Artifact", "Magic Weapon"],
+    "variants": ["Linh Khí nếu source nhấn spiritual quality; Thần Khí nếu divine-tier"]
+  },
+  {
+    "source_terms": ["Heaven-grade", "Heaven-rank", "Heavenly Grade", "천급", "天級", "천품", "天品"],
+    "canonical_vi": "Thiên Phẩm",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Hạng Thiên Đường", "Cấp Thiên", "Loại Thiên", "Heaven-grade", "Heavenly Grade"],
+    "policy": "Grade system (phẩm): Phàm < Hoàng < Huyền < Địa < Thiên — tên Hán Việt KHÔNG dịch nghĩa"
+  },
+  {
+    "source_terms": ["Earth-grade", "Earth-rank", "지급", "地級", "지품", "地品"],
+    "canonical_vi": "Địa Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Hạng Mặt Đất", "Cấp Đất", "Earth-grade"],
+    "variants": ["theo hệ phẩm: Phàm Phẩm < Hoàng Phẩm < Huyền Phẩm < Địa Phẩm < Thiên Phẩm"]
+  },
+  {
+    "source_terms": ["Profound-grade", "Profound-rank", "현급", "玄級", "현품", "玄品"],
+    "canonical_vi": "Huyền Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Cấp Huyền Bí", "Hạng Sâu Sắc", "Profound-grade"]
+  },
+  {
+    "source_terms": ["Yellow-grade", "Yellow-rank", "황급", "黃級"],
+    "canonical_vi": "Hoàng Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Cấp Vàng", "Hạng Vàng", "Yellow-grade"]
+  },
+  {
+    "source_terms": ["King-grade", "King-rank", "왕급", "王級", "왕품", "王品"],
+    "canonical_vi": "Vương Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Cấp Vua", "Hạng Vương", "King-grade"]
+  },
+  {
+    "source_terms": ["Emperor-grade", "Emperor-rank", "제급", "帝級", "황제급"],
+    "canonical_vi": "Đế Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Cấp Hoàng Đế", "Hạng Đế", "Emperor-grade"]
+  },
+  {
+    "source_terms": ["Sacred-grade", "Saint-grade", "성급", "聖級"],
+    "canonical_vi": "Thánh Phẩm",
+    "kind": "other",
+    "wrong_translations": ["Cấp Thiêng Liêng", "Hạng Thánh", "Sacred-grade", "Saint-grade"]
+  },
+  {
+    "source_terms": ["Breakthrough", "Break through", "突破", "돌파", "突破境"],
+    "canonical_vi": "Đột Phá",
+    "kind": "other",
+    "wrong_translations": ["Vượt Qua Rào Cản", "Phá Vỡ Qua", "Phá Vỡ Giới Hạn", "Breakthrough"],
+    "policy": "Đột Phá là đúng cho cultivation breakthrough — giữ nguyên, không dịch giải thích dài"
+  },
+  {
+    "source_terms": ["Closed-door Cultivation", "Closed-door Training", "폐관수련", "閉關修煉", "修煉"],
+    "canonical_vi": "Bế Quan Tu Luyện",
+    "kind": "other",
+    "wrong_translations": ["Tu Luyện Cửa Đóng", "Bế Môn Luyện Tập", "Closed-door Cultivation"],
+    "variants": ["Bế Quan (rút gọn)"]
+  },
+  {
+    "source_terms": ["Comprehension", "Enlightenment", "Insight", "깨달음", "悟", "領悟"],
+    "canonical_vi": "Ngộ",
+    "kind": "other",
+    "wrong_translations": ["Sự Hiểu Biết", "Nhận Thức", "Sự Giác Ngộ Phật", "Comprehension"],
+    "variants": ["Lĩnh Ngộ (lĩnh hội và ngộ đạo)", "Đốn Ngộ (sudden enlightenment)"]
+  },
+  {
+    "source_terms": ["Sword Master", "Sword Sage", "검성", "劍聖", "검제", "劍帝", "검신", "劍神"],
+    "canonical_vi": "Kiếm Thánh",
+    "kind": "title",
+    "wrong_translations": ["Bậc Thầy Kiếm", "Bậc Thầy Kiếm Thuật", "Sword Master"],
+    "variants": ["Kiếm Đế nếu source = Sword Emperor; Kiếm Thần nếu source = Sword God"]
+  },
+  {
+    "source_terms": ["Grandmaster", "Grand Master", "종사", "宗師", "고수", "高手"],
+    "canonical_vi": "Tông Sư",
+    "kind": "title",
+    "wrong_translations": ["Thầy Lớn", "Bậc Thầy Vĩ Đại", "Grandmaster"],
+    "variants": ["Cao Thủ nếu source = expert/high-level martial artist"]
+  },
+  {
+    "source_terms": ["Martial Lord", "Martial King", "무왕", "武王", "무황", "武皇"],
+    "canonical_vi": "Võ Vương",
+    "kind": "title",
+    "wrong_translations": ["Lãnh Chúa Võ", "Vua Võ Thuật", "Martial Lord"],
+    "variants": ["Võ Hoàng nếu source = Martial Emperor"]
+  },
+  {
+    "source_terms": ["Sea of Consciousness", "Consciousness Sea", "식해", "識海", "정신바다"],
+    "canonical_vi": "Thức Hải",
+    "kind": "other",
+    "wrong_translations": ["Biển Ý Thức", "Đại Dương Tâm Trí", "Sea of Consciousness"]
+  },
+  {
+    "source_terms": ["Bone Tempering", "Bone Refinement", "골격", "骨格", "골체", "骨體"],
+    "canonical_vi": "Luyện Cốt",
+    "kind": "technique",
+    "wrong_translations": ["Tôi Luyện Xương", "Rèn Luyện Xương", "Bone Tempering"],
+    "policy": "dùng Hán Việt: Cốt = xương, Luyện = rèn tôi — KHÔNG dịch thành từng chữ tiếng Việt"
+  },
+  {
+    "source_terms": ["Muscle Tempering", "Muscle Refinement", "근육단련", "筋骨"],
+    "canonical_vi": "Luyện Cơ",
+    "kind": "technique",
+    "wrong_translations": ["Tôi Luyện Cơ Bắp", "Rèn Luyện Cơ", "Muscle Tempering"]
+  },
+  {
+    "source_terms": ["Pressure", "Martial Pressure", "Killing Intent", "살기", "殺氣", "위압", "威壓"],
+    "canonical_vi": "Sát Khí",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Áp Lực Giết Chóc", "Căng Thẳng Sát Thương", "Killing Intent"],
+    "variants": ["Uy Áp nếu source = intimidating pressure/aura; Sát Khí nếu killing intent"]
+  },
+  {
+    "source_terms": ["Martial Arts World", "Murim World", "무림세계", "武林世界"],
+    "canonical_vi": "Thế Giới Võ Lâm",
+    "kind": "place",
+    "wrong_translations": ["Thế Giới Võ Thuật", "Thế Giới Chiến Đấu", "Murim World"]
+  },
+  {
+    "source_terms": ["Technique", "Art", "무기", "技", "기법", "技法"],
+    "canonical_vi": "Kỹ Năng",
+    "kind": "technique",
+    "wrong_translations": ["Kỹ Thuật", "Nghệ Thuật"],
+    "policy": "dùng Kỹ Năng cho skill chung, Công Pháp cho cultivation method, Chiêu Thức cho combat move"
+  },
+  {
+    "source_terms": ["Qi Sea", "Energy Sea", "기해", "氣海", "내력의 바다"],
+    "canonical_vi": "Khí Hải",
+    "kind": "other",
+    "wrong_translations": ["Biển Khí", "Biển Năng Lượng", "Qi Sea", "Energy Sea"]
+  },
+  {
+    "source_terms": ["Core", "Gold Core", "golden core", "금단", "金丹", "핵심", "核"],
+    "canonical_vi": "Kim Đan",
+    "kind": "realm",
+    "wrong_translations": ["Lõi Vàng", "Lõi Năng Lượng", "Gold Core", "Golden Core"],
+    "meaning": "giai đoạn tu tiên khi nội đan hình thành — Kết Đan là giai đoạn, Kim Đan là vật"
+  },
+  {
+    "source_terms": ["Blood Essence", "Blood Origin", "혈정", "血精", "혈기", "血基"],
+    "canonical_vi": "Huyết Tinh",
+    "kind": "other",
+    "wrong_translations": ["Tinh Chất Máu", "Bản Chất Máu", "Blood Essence"]
+  },
+  {
+    "source_terms": ["Sword Domain", "Domain", "검역", "劍域", "영역", "領域"],
+    "canonical_vi": "Kiếm Vực",
+    "kind": "technique",
+    "wrong_translations": ["Phạm Vi Kiếm", "Lãnh Thổ Kiếm", "Sword Domain", "Domain"],
+    "variants": ["Vực Kiếm (thứ tự đảo)", "Lĩnh Vực nếu source = field/area (không phải combat domain)"]
+  },
+  {
+    "source_terms": ["Law", "Dao", "이치", "理致", "법칙", "法則", "도", "道"],
+    "canonical_vi": "Đạo",
+    "kind": "other",
+    "wrong_translations": ["Luật Pháp", "Pháp Luật", "Quy Tắc", "Law"],
+    "policy": "cultivation 'Law/Dao' = Đạo; 'Laws of nature' trong cultivation = Thiên Địa Đại Đạo; pháp luật thực tế = luật pháp"
+  },
+  {
+    "source_terms": ["Thunder Tribulation", "Heavenly Lightning", "천둥", "天雷", "천뢰", "天劫"],
+    "canonical_vi": "Thiên Lôi",
+    "kind": "other",
+    "wrong_translations": ["Sét Trời", "Sấm Sét Thiên Đường", "Thunder Tribulation"],
+    "variants": ["Thiên Kiếp nếu source = Heavenly Tribulation"]
+  },
+  {
+    "source_terms": ["Illusory", "Phantasm", "환영", "幻影", "허상", "虛像"],
+    "canonical_vi": "Ảo Ảnh",
+    "kind": "other",
+    "wrong_translations": ["Ảo Giác", "Hình Ảnh Giả", "Illusory", "Phantasm"]
+  },
+  {
+    "source_terms": ["Nascent Soul", "Spirit", "원신", "元神", "영아", "靈兒"],
+    "canonical_vi": "Nguyên Anh",
+    "kind": "realm",
+    "wrong_translations": ["Linh Hồn Mới Sinh", "Linh Hồn Nguyên Sơ", "Nascent Soul"],
+    "meaning": "giai đoạn tu tiên cao cấp — Nguyên Thần (fundamental soul) tách ra từ thể xác"
+  },
+  {
+    "source_terms": ["Spirit Vein", "Spiritual Vein", "영맥", "靈脈", "기맥", "氣脈"],
+    "canonical_vi": "Linh Mạch",
+    "kind": "other",
+    "wrong_translations": ["Mạch Tinh Thần", "Gân Linh", "Spirit Vein", "Spiritual Vein"],
+    "variants": ["Long Mạch nếu source = Dragon Vein; Địa Mạch nếu earth vein"]
+  },
+  {
+    "source_terms": ["Technique Method", "Cultivation Method", "수련법", "修煉法", "수행법", "修行法"],
+    "canonical_vi": "Công Pháp",
+    "kind": "technique",
+    "priority": true,
+    "wrong_translations": ["Phương Pháp Tu Luyện", "Phương Pháp Kỹ Thuật", "Cultivation Method", "Technique Method"]
+  },
+  {
+    "source_terms": ["Monster", "Magical Beast", "마수", "魔獸", "요괴", "妖怪", "요수", "妖獸"],
+    "canonical_vi": "Ma Thú",
+    "kind": "other",
+    "wrong_translations": ["Quái Vật", "Thú Phép", "Quái Thú", "Monster", "Magical Beast"],
+    "variants": ["Yêu Quái nếu source = yokai/spirit monster; Dị Thú nếu mutant beast"]
+  },
+  {
+    "source_terms": ["Martial Arts Competition", "Tournament", "대회", "大會", "무도회", "武道會"],
+    "canonical_vi": "Đại Hội",
+    "kind": "other",
+    "wrong_translations": ["Cuộc Thi Võ Thuật", "Giải Đấu", "Tournament", "Competition"]
+  },
+  {
+    "source_terms": ["Poison", "Venom", "독", "毒", "독기", "毒氣"],
+    "canonical_vi": "Độc",
+    "kind": "other",
+    "wrong_translations": ["Chất Độc", "Nọc Độc"],
+    "policy": "Độc (Hán Việt) trong cultivation context; 'độc chất' cho vật lý; 'độc khí' khi nói về khí độc"
   }
 ]
