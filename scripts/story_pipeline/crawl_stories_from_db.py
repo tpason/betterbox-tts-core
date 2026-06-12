@@ -1938,6 +1938,40 @@ def crawl_novelfire_story(story_row: dict[str, Any], args: argparse.Namespace) -
     subprocess.run(command, check=True)
 
 
+def crawl_jadescrolls_story(story_row: dict[str, Any], args: argparse.Namespace) -> None:
+    command = [
+        sys.executable,
+        str(ROOT / "scripts/story_pipeline/crawl_jadescrolls_chapters.py"),
+        "--story-url", story_row["source_url"],
+        "--timeout", str(args.timeout),
+        "--retries", str(args.retries),
+        "--retry-sleep", str(args.retry_sleep),
+        "--max-catalog-pages", str(args.max_catalog_pages),
+        "--chapter-delay", str(args.chapter_delay),
+        "--min-text-chars", str(args.min_text_chars),
+        "--raw-en-output-root", args.raw_en_output_root,
+        "--translated-output-root", getattr(args, "translated_output_root", "story_data/translated"),
+        "--polished-output-root", args.polished_output_root,
+        "--output-root", str(Path(args.catalog_output_root) / "jadescrolls"),
+        "--vi-model", args.vi_model,
+        "--translate-model", args.translate_model,
+        "--polish-max-attempts", str(args.polish_max_attempts),
+        "--post-translate", args.post_translate,
+        "--upsert-db",
+        "--download-text",
+        "--enqueue-polish",
+    ]
+    if args.max_chapters:
+        command.extend(["--max-chapters", str(args.max_chapters)])
+    if args.overwrite:
+        command.append("--overwrite")
+    if getattr(args, "no_persist_files", False):
+        command.append("--no-write-files")
+    if args.stop_on_error:
+        command.append("--stop-on-error")
+    subprocess.run(command, check=True)
+
+
 def enqueue_polish_for_args(
     source_code: str,
     story: dict[str, Any],
@@ -2038,6 +2072,8 @@ def process_story(
             crawl_fanmtl_story(story, args)
         elif source_code == "novelfire":
             crawl_novelfire_story(story, args)
+        elif source_code == "jadescrolls":
+            crawl_jadescrolls_story(story, args)
         else:
             print(f"[SKIP] unsupported source: {source_code}")
             return source_code, "unsupported"
@@ -2120,7 +2156,7 @@ def main() -> None:
         help=(
             "Ví dụ: hako wattpad_vn truyenfull_today truyenyy docln manhwatv "
             "sttruyen truyenchuhay truyenhoangdung qidian royalroad lightnovelpub "
-            "novelbin freewebnovel novelhub skydemonorder. "
+            "novelbin freewebnovel novelhub jadescrolls skydemonorder. "
             "Bỏ trống = tất cả."
         ),
     )

@@ -39,6 +39,10 @@ from scripts.story_pipeline.crawl_lightnovelpub_chapters import (
     fetch_chapter_text as fetch_lightnovelpub_text,
     parse_catalog as parse_lightnovelpub_site_catalog,
 )
+from scripts.story_pipeline.crawl_jadescrolls_chapters import (
+    fetch_chapter_text as fetch_jadescrolls_text,
+    parse_catalog as parse_jadescrolls_catalog,
+)
 from scripts.story_pipeline.crawl_manhwatv_chapters import (
     fetch_chapter_text as fetch_manhwatv_text,
     parse_catalog as parse_manhwatv_catalog,
@@ -88,6 +92,7 @@ SUPPORTED_SOURCE_BASES = {
     "novelbin": "https://novelbin.com",
     "freewebnovel": "https://freewebnovel.com",
     "lightnovelpub": "https://lightnovelpub.org",
+    "jadescrolls": "https://jadescrolls.com",
     "novelhub": "https://novelhub.net",
     "skydemonorder": "https://skydemonorder.com",
 }
@@ -98,6 +103,7 @@ SOURCE_LANGUAGES = {
     "novelbin": "en",
     "freewebnovel": "en",
     "lightnovelpub": "en",
+    "jadescrolls": "en",
     "novelhub": "en",
     "skydemonorder": "en",
 }
@@ -146,6 +152,8 @@ def detect_source(url: str) -> tuple[str, str, str]:
         return "freewebnovel", "FreeWebNovel", "https://freewebnovel.com"
     if "lightnovelpub.org" in host:
         return "lightnovelpub", "LightNovelPub", "https://lightnovelpub.org"
+    if "jadescrolls.com" in host:
+        return "jadescrolls", "JadeScrolls", "https://jadescrolls.com"
     if "novelhub.net" in host:
         return "novelhub", "NovelHub", "https://novelhub.net"
     if "skydemonorder.com" in host:
@@ -498,6 +506,8 @@ def parse_catalog_for_source(source_code: str, url: str, args: argparse.Namespac
         return parse_freewebnovel_catalog(url, args)
     if source_code == "lightnovelpub":
         return parse_lightnovelpub_catalog(url, args)
+    if source_code == "jadescrolls":
+        return parse_jadescrolls_catalog(url, args)
     if source_code == "novelhub":
         return parse_novelhub_catalog(url, args)
     raise ValueError(f"Unsupported alternate source: {source_code}")
@@ -533,6 +543,8 @@ def fetch_text_for_source(source_code: str, chapter_url: str, args: argparse.Nam
         return extract_freewebnovel_text(fetch_html(chapter_url, args.timeout, args.retries, args.retry_sleep))
     if source_code == "lightnovelpub":
         return fetch_lightnovelpub_text(chapter_url, timeout=args.timeout, retries=args.retries, retry_sleep=args.retry_sleep)
+    if source_code == "jadescrolls":
+        return fetch_jadescrolls_text(chapter_url, args)
     if source_code == "novelhub":
         return extract_novelhub_text(fetch_html(chapter_url, args.timeout, args.retries, args.retry_sleep))
     raise ValueError(f"Unsupported alternate source: {source_code}")
