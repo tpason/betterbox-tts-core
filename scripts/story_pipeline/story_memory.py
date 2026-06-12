@@ -162,7 +162,7 @@ def _name_boundary_pattern(surface: str) -> re.Pattern[str]:
 
 
 def _replace_surface(text: str, surface: str, replacement: str) -> str:
-    if not surface or not replacement or _normalize_key(surface) == _normalize_key(replacement):
+    if not surface or not replacement or surface == replacement:
         return text
     pattern = _name_boundary_pattern(surface)
 
@@ -521,7 +521,7 @@ def apply_story_memory_replacements_tracked(
     corrections: dict[str, str] = {}
     for surface, replacement in sorted(memory.replacements.items(), key=lambda kv: len(kv[0]), reverse=True):
         surface_s, repl_s = str(surface), str(replacement)
-        if not surface_s or not repl_s or _normalize_key(surface_s) == _normalize_key(repl_s):
+        if not surface_s or not repl_s or surface_s == repl_s:
             continue
         if _name_boundary_pattern(surface_s).search(result):
             corrections[surface_s] = repl_s
@@ -624,7 +624,13 @@ def find_story_memory_priority_violations(text: str, memory: StoryMemory) -> lis
             continue
         for key in ("wrong_translations", "forbidden", "forbidden_literal"):
             for surface in _string_list(item.get(key)):
-                if surface and _name_boundary_pattern(surface).search(text):
+                if not surface:
+                    continue
+                # Skip case-only differences — apply_story_memory_replacements will
+                # silently correct these; injecting them as retry hints wastes LLM calls.
+                if _normalize_key(surface) == _normalize_key(canonical):
+                    continue
+                if _name_boundary_pattern(surface).search(text):
                     hints.append(f"- `{surface}` → phải là `{canonical}`")
     return list(dict.fromkeys(hints))
 
