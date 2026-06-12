@@ -651,6 +651,35 @@
   },
   {
     "source_terms": [
+      "Spirit Herb",
+      "Spiritual Herb",
+      "Spiritual Plant",
+      "Immortal Herb",
+      "영초",
+      "靈草",
+      "靈藥"
+    ],
+    "canonical_vi": "Linh Thảo",
+    "kind": "item",
+    "priority": true,
+    "wrong_translations": [
+      "thảo dược tinh thần",
+      "Thảo Dược Tinh Thần",
+      "thảo dược tâm linh",
+      "dược liệu tinh thần",
+      "thảo mộc tinh thần",
+      "thảo mộc linh thiêng",
+      "Spirit Herb",
+      "Spiritual Herb",
+      "Spiritual Plant"
+    ],
+    "variants": [
+      "Linh Dược = dạng lỏng/chiết xuất",
+      "Tiên Thảo = cấp bất tử"
+    ]
+  },
+  {
+    "source_terms": [
       "Formation",
       "Array",
       "Spell Formation",
