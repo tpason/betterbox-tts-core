@@ -26,7 +26,7 @@ ROOT = SCRIPT_DIR.parents[1]
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from story_memory import load_story_memory  # noqa: E402
+from story_memory import load_seed_glossary, load_story_memory  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # EN fragment detection
@@ -46,11 +46,11 @@ _EN_ALLOWLIST: frozenset[str] = frozenset(
     ]
 )
 
-# Matches a run of 2+ consecutive ASCII-letter words (not inside [] system
-# boxes which are intentional).  We cap at 10 words to avoid false positives
-# on romanised Vietnamese names.
+# Matches [...] system/status box spans so we can mask them before scanning.
+_BRACKET_SPAN_RE = re.compile(r"\[[^\]]{1,500}\]")
+
+# Matches a run of 2+ consecutive ASCII-letter words (after bracket masking).
 _EN_PHRASE_RE = re.compile(
-    r"(?<!\[)"                          # not inside a system-box bracket
     r"\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){1,9})\b"  # Title Case phrase ≥2 words
 )
 
@@ -93,9 +93,15 @@ def _looks_like_korean_name(phrase: str) -> bool:
     return len(words) >= 1 and all(w in _KOREAN_NAME_SYLLABLES for w in words)
 
 
+def _mask_brackets(text: str) -> str:
+    """Replace [...] spans with spaces so EN patterns don't match inside them."""
+    return _BRACKET_SPAN_RE.sub(lambda m: " " * len(m.group()), text)
+
+
 def _extract_en_fragments(text: str) -> list[str]:
+    masked = _mask_brackets(text)
     fragments: list[str] = []
-    for m in _EN_PHRASE_RE.finditer(text):
+    for m in _EN_PHRASE_RE.finditer(masked):
         phrase = m.group(1)
         words = phrase.split()
         if all(w.lower() in _EN_ALLOWLIST for w in words):
@@ -103,7 +109,7 @@ def _extract_en_fragments(text: str) -> list[str]:
         if _looks_like_korean_name(phrase):
             continue
         fragments.append(phrase)
-    for m in _EN_ALLCAPS_RE.finditer(text):
+    for m in _EN_ALLCAPS_RE.finditer(masked):
         phrase = m.group(1)
         if all(w.lower() in _EN_ALLOWLIST for w in phrase.split()):
             continue
@@ -128,9 +134,11 @@ def _find_inconsistencies(
     story_id: str = "",
     slug: str = "",
     char_map_file: str = "",
+    genre: str = "",
 ) -> list[dict[str, Any]]:
-    """For each glossary entry, check if its wrong_translations appear in the
-    output text.  Return a list of findings."""
+    """For each glossary entry (story + seed), check if wrong_translations
+    appear in the output.  Story entries take precedence; seed entries fill in
+    the gaps.  Returns a list of findings."""
     try:
         mem = load_story_memory(
             story_memory_dir=story_memory_dir,
@@ -142,9 +150,29 @@ def _find_inconsistencies(
         print(f"[WARN] Could not load story memory: {exc}", file=sys.stderr)
         return []
 
+    # Build combined glossary: story entries first (higher precedence), then
+    # seed entries whose canonical_vi doesn't duplicate a story entry.
+    story_canonicals: set[str] = set()
+    combined_items: list[dict[str, Any]] = []
+    for item in mem.glossary:
+        cv = str(item.get("canonical_vi") or item.get("vi") or "").strip().lower()
+        if cv:
+            story_canonicals.add(cv)
+        combined_items.append(item)
+
+    if genre:
+        try:
+            seed_items = load_seed_glossary(genre)
+            for item in seed_items:
+                cv = str(item.get("canonical_vi") or item.get("vi") or "").strip().lower()
+                if cv and cv not in story_canonicals:
+                    combined_items.append(item)
+        except Exception as exc:
+            print(f"[WARN] Could not load seed glossary for genre {genre!r}: {exc}", file=sys.stderr)
+
     findings: list[dict[str, Any]] = []
 
-    for item in mem.glossary:
+    for item in combined_items:
         canonical = str(item.get("canonical_vi") or item.get("vi") or "").strip()
         if not canonical:
             continue
@@ -343,8 +371,9 @@ def main() -> None:
             story_id=args.story_id,
             slug=args.slug,
             char_map_file=char_map_file,
+            genre=args.genre,
         )
-    elif not story_memory_dir:
+    elif not args.no_term_check and not story_memory_dir:
         print("[WARN] No story_memory dir found — skipping wrong-term scan", file=sys.stderr)
 
     # --- Output ---
