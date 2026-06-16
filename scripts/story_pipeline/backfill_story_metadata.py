@@ -180,12 +180,27 @@ def fix_chapter_urls(args: argparse.Namespace) -> None:
     print(f"\n[BUG1] DONE deleted={deleted} fixed={fixed} skipped={skipped}", flush=True)
 
 
+_GARBAGE_AUTHOR_PATTERN = re.compile(
+    r"^(tác giả\s*:?\s*|author\s*:?\s*|start reading|sky demon order)$",
+    re.IGNORECASE,
+)
+
+
+def _is_valid_author(author: str) -> bool:
+    if not author or len(author) < 2:
+        return False
+    if _GARBAGE_AUTHOR_PATTERN.match(author.strip()):
+        return False
+    return True
+
+
 def _try_extract_author_from_url(source_code: str, source_url: str, args: argparse.Namespace) -> str:
     """Re-fetch story page và extract author theo source."""
     try:
         if source_code == "truyenfull_today":
             catalog = crawl_truyenfull_catalog(source_url, timeout=args.timeout, retries=args.retries, retry_sleep=args.retry_sleep)
-            return catalog.get("author") or ""
+            author = catalog.get("author") or ""
+            return author if _is_valid_author(author) else ""
         if source_code == "royalroad":
             catalog = crawl_royalroad_catalog(source_url, timeout=args.timeout, retries=args.retries, retry_sleep=args.retry_sleep)
             return catalog.get("author") or ""

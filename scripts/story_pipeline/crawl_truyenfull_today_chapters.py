@@ -145,15 +145,16 @@ def parse_catalog(story_url: str, timeout: int = 30, retries: int = 3, retry_sle
 
         author_node = (
             first_soup.select_one("a[href*='/tac-gia/']")
+            or first_soup.select_one(".author a")
             or first_soup.select_one(".author")
             or first_soup.find(string=re.compile(r"Tác giả", re.IGNORECASE))
         )
         author = ""
         if hasattr(author_node, "get_text"):
-            author = clean_text(author_node.get_text(" ", strip=True))
+            raw = clean_text(author_node.get_text(" ", strip=True))
+            author = re.sub(r"^Tác giả\s*:?\s*", "", raw, flags=re.IGNORECASE).strip()
         elif author_node:
-            author = clean_text(str(author_node))
-            author = re.sub(r"^Tác giả\s*:?", "", author, flags=re.IGNORECASE).strip()
+            author = re.sub(r"^Tác giả\s*:?\s*", "", clean_text(str(author_node)), flags=re.IGNORECASE).strip()
 
         tags = [
             clean_text(node.get_text(" ", strip=True))
