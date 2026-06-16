@@ -48,7 +48,15 @@ def crawl_catalog(story_url: str, timeout: int, retries: int = 3, retry_sleep: f
 
     title_node = soup.select_one("h1, .series-name, .series-title")
     title = title_node.get_text(" ", strip=True) if title_node else slug_from_url(story_url)
-    author_node = soup.select_one(".series-author a, .author a, a[href*='/thanh-vien/']")
+    author_node = (
+        soup.select_one(".series-author a")
+        or soup.select_one(".series-author")
+        or soup.select_one(".author a")
+        or soup.select_one(".author")
+        or soup.select_one("a[href*='/thanh-vien/']")
+        or soup.select_one("[class*='author'] a")
+        or soup.select_one("[class*='author']")
+    )
     author = author_node.get_text(" ", strip=True) if author_node else None
     cover_node = soup.select_one("meta[property='og:image'], .series-cover img, .cover img")
     cover_image_url = None

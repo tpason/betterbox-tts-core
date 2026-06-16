@@ -68,9 +68,12 @@ def parse_catalog(story_url: str, timeout: int = 30, retries: int = 3, retry_sle
     title = clean_text(title_node.get_text(" ", strip=True)) if title_node else story_slug(story_url)
 
     author_node = (
-        soup.select_one("a[href*='/profile/']")
+        soup.select_one("h4 a[href*='/profile/']")
+        or soup.select_one(".fic-header a[href*='/profile/']")
+        or soup.select_one("[itemprop='author'] a")
+        or soup.select_one("[itemprop='author']")
+        or soup.select_one(".fic-author a")
         or soup.select_one(".fic-author")
-        or soup.select_one("h4 a[href]")
     )
     author = clean_text(author_node.get_text(" ", strip=True)) if author_node else ""
 

@@ -59,6 +59,21 @@ def parse_chapter_number(title: str, url: str, fallback: int) -> int:
     return fallback
 
 
+def _extract_truyenyy_author(html: str) -> str:
+    """TruyenYY dùng Next.js — author nằm trong __next_f.push dạng escaped JSON."""
+    # Tìm block "author":{...} rồi extract "name" bên trong
+    m = re.search(r'\\"author\\":\{([^}]+)\}', html)
+    if m:
+        name_m = re.search(r'\\"name\\":\\"([^"\\]+)\\"', m.group(1))
+        if name_m:
+            return clean_text(name_m.group(1))
+    # Fallback: unescaped JSON (nếu có)
+    m2 = re.search(r'"author"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"', html)
+    if m2:
+        return clean_text(m2.group(1))
+    return ""
+
+
 def parse_chapter_id(url: str, fallback: int) -> str:
     parts = [part for part in urlparse(url).path.split("/") if part]
     return parts[-1] if parts else str(fallback)
@@ -136,8 +151,17 @@ def parse_catalog(
         title = re.sub(r"\s*[-|]\s*TruyenYY.*$", "", title, flags=re.IGNORECASE).strip()
 
         page_text = clean_text(first_soup.get_text(" ", strip=True))
-        author_node = first_soup.select_one("a[href*='/tac-gia'], a[href*='/author']")
-        author = clean_text(author_node.get_text(" ", strip=True)) if author_node else ""
+        # TruyenYY là Next.js — author nằm trong __next_f.push JSON, không phải DOM element.
+        author = _extract_truyenyy_author(first_html)
+        if not author:
+            author_node = (
+                first_soup.select_one("a[href*='/tac-gia/']")
+                or first_soup.select_one("a[href*='/tac-gia']")
+                or first_soup.select_one("[class*='author'] a")
+                or first_soup.select_one("[class*='author']")
+                or first_soup.select_one("a[href*='/author']")
+            )
+            author = clean_text(author_node.get_text(" ", strip=True)) if author_node else ""
         tags = [
             clean_text(anchor.get_text(" ", strip=True))
             for anchor in first_soup.select("a[href*='/the-loai'], a[href*='he-thong'], a[href*='tien-hiep'], a[href*='huyen-huyen']")

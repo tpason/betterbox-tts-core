@@ -649,7 +649,7 @@ def collect_truyenfull_today_story_urls_from_lists(
                     continue
                 if "/the-loai/" in parsed_story.path or "/danh-sach/" in parsed_story.path:
                     continue
-                if "/chuong-" in parsed_story.path or "/tac-gia/" in parsed_story.path or story_url in seen:
+                if re.search(r"/(?:quyen-\d+-)?chuong-\d+", parsed_story.path) or "/tac-gia/" in parsed_story.path or story_url in seen:
                     continue
                 title = clean_text(link.get_text(" ", strip=True))
                 if not title or len(title) < 3:
@@ -922,7 +922,7 @@ def discover_truyenfull_today(
                     continue
                 if "/the-loai/" in parsed_story.path or "/danh-sach/" in parsed_story.path:
                     continue
-                if "/chuong-" in parsed_story.path or story_url in seen:
+                if re.search(r"/(?:quyen-\d+-)?chuong-\d+", parsed_story.path) or story_url in seen:
                     continue
                 title = clean_text(link.get_text(" ", strip=True))
                 if not title or len(title) < 3:
