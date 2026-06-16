@@ -922,9 +922,15 @@ def first_content_line(text: str) -> str:
     return ""
 
 
+_PROSE_SENTENCE_RE = re.compile(r"[!?]\s+\S|[.]\s+[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĐÀ-ỹ]")
+
+
 def maybe_update_translated_chapter_title(job: dict, translated_text_content: str) -> str:
     title = first_content_line(translated_text_content)
-    if not title or len(title) > 220:
+    if not title or len(title) > 120:
+        return ""
+    # Dòng đầu chứa nhiều câu văn xuôi → không phải title chapter
+    if _PROSE_SENTENCE_RE.search(title):
         return ""
     repo.update_chapter_title(job["chapter_id"], title)
     return title
