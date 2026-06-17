@@ -704,27 +704,28 @@ def _char_map_path_from_db_metadata(story_id: str) -> str:
     """
     if not story_id:
         return ""
+    import time as _time
     try:
+        # Check fresh tmp file TRƯỚC khi query DB — tránh repeated DB read mỗi chapter
+        tmp_path = Path(f"/tmp/betterbox_char_map_{story_id}.txt")
+        if tmp_path.exists() and (_time.time() - tmp_path.stat().st_mtime) < 300:
+            return str(tmp_path)
+
         from story_db.story_pipeline_db import repository as repo
         story = repo.get_story_by_id(story_id)
         if not story:
             return ""
         meta = story.get("metadata") or {}
-        # Thử file path trong metadata trước
+        # Thử file path trong metadata trước (legacy)
         db_path_str = meta.get("char_map_path", "")
         if db_path_str:
             db_path = _resolve_path(Path(db_path_str))
             if db_path.exists():
                 return str(db_path)
-        # Fallback: dùng content từ metadata
+        # Ghi content từ DB ra tmp và cache 5 phút
         content = meta.get("char_map_content", "")
         if not content:
             return ""
-        tmp_path = Path(f"/tmp/betterbox_char_map_{story_id}.txt")
-        # Reuse nếu file còn mới (< 5 phút) để tránh repeated DB read + write mỗi chapter
-        import time as _time
-        if tmp_path.exists() and (_time.time() - tmp_path.stat().st_mtime) < 300:
-            return str(tmp_path)
         tmp_path.write_text(content, encoding="utf-8")
         return str(tmp_path)
     except Exception:
