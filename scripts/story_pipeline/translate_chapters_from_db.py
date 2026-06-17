@@ -722,7 +722,7 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
     _tmp_translated: Path | None = None
     try:
         chapter_num = int(row.get("chapter_number") or 0)
-        stable_name = Path(row["raw_text_path"]).name if row.get("raw_text_path") else f"chapter{chapter_num:04d}.txt"
+        stable_name = f"chapter{chapter_num:04d}.txt"
         raw_path, _tmp_in = _resolve_raw_input(row)
         raw_language = likely_raw_language(row)
         char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
@@ -852,7 +852,7 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
     _tmp_polished: Path | None = None
     try:
         chapter_num = int(row.get("chapter_number") or 0)
-        stable_name = Path(row["raw_text_path"]).name if row.get("raw_text_path") else f"chapter{chapter_num:04d}.txt"
+        stable_name = f"chapter{chapter_num:04d}.txt"
         raw_path, _tmp_in = _resolve_raw_input(row)
         effective_char_map = (job.get("payload") or {}).get("char_map_file") or getattr(args, "char_map_file", "") or find_char_map_file(
             story_id=str(row.get("story_id") or ""),

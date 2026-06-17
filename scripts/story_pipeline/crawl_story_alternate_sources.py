@@ -701,14 +701,6 @@ def crawl_alternate_source(target_story: dict[str, Any], alt_url: str, args: arg
     catalog = parse_catalog_for_source(source_code, alt_url, args)
     source_slug = safe_slug(catalog.get("slug") or catalog.get("title") or source_code)
     target_slug = safe_slug(args.target_slug or target_story.get("metadata", {}).get("slug") or target_story["title"])
-    output_root = Path(args.text_output_root)
-    if raw_language in {"zh", "cn"}:
-        output_root = Path(args.raw_zh_output_root)
-    elif raw_language in {"en"}:
-        output_root = Path(args.raw_en_output_root)
-    elif raw_language in {"ko", "kr"}:
-        output_root = Path(args.raw_ko_output_root)
-    output_dir = output_root / target_slug / f"from_{source_code}_{source_slug}"
     manifest_path = Path(args.catalog_output_root) / "alternate_sources" / target_slug / source_code / source_slug / "chapters.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -59,6 +59,8 @@ from scripts.story_pipeline.crawl_utils import compact_text  # noqa: E402
 _BARE_TITLE_RE = re.compile(r"^(Chapter|Chương|chapter|chương)\s+\d+[\s.]*$", re.IGNORECASE)
 _LLM_ARTIFACT_RE = re.compile(r"^\((No text|The text|Narration|văn bản)", re.IGNORECASE)
 _PROSE_SENTENCE_RE = re.compile(r"[!?]\s+\S|[.]\s+[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĐÀ-ỹ]")
+# Crawl site announcements thường chứa URL domain (truyen1.one, truyenfull.vn, ...)
+_URL_IN_TITLE_RE = re.compile(r"\b\w[\w-]+\.(com|net|org|vn|one|io|me|xyz)\b", re.IGNORECASE)
 
 
 def is_suspicious_title(title: str) -> bool:
@@ -77,6 +79,8 @@ def is_valid_replacement(title: str) -> bool:
     if not title or not title.strip():
         return False
     t = title.strip()
+    if len(t) < 2:
+        return False
     if len(t) > 120:
         return False
     if _BARE_TITLE_RE.match(t):
@@ -84,6 +88,8 @@ def is_valid_replacement(title: str) -> bool:
     if _LLM_ARTIFACT_RE.match(t):
         return False
     if _PROSE_SENTENCE_RE.search(t):
+        return False
+    if _URL_IN_TITLE_RE.search(t):
         return False
     return True
 
@@ -165,34 +171,81 @@ def fetch_affected_chapters(
 
 
 # ── Strategy: raw-scan ─────────────────────────────────────────────────────────
-# Một số crawlers (lightnovelpub, wetriedtls) store thêm full title trong
-# các dòng ngay sau dòng đầu. Pattern: "Chapter N - Subtitle" hoặc "Chapter N: Subtitle"
+# Patterns được hỗ trợ:
+#   1. "Chapter N - Subtitle" / "Chương N: Subtitle" (title + subtitle trên cùng dòng)
+#   2. "Story title chương N: Subtitle" (crawl lưu full story title + chapter)
+#   3. "Chương N:" trên dòng riêng, subtitle dòng tiếp theo
 _CHAPTER_WITH_SUBTITLE_RE = re.compile(
     r"^(?:Chapter|Chương)\s+\d+\s*[-:]\s*(.+)", re.IGNORECASE
 )
+# Khi story title được nhúng vào line (pattern 2): "... chương N: Subtitle"
+_INLINE_CHAPTER_RE = re.compile(
+    r"(?:chapter|chương)\s+\d+\s*[-:]\s*(.+)", re.IGNORECASE
+)
+# Dòng chỉ có "Chapter N:" hoặc "Chương N:" không có subtitle
+_BARE_CHAPTER_HEADER_RE = re.compile(
+    r"^(?:Chapter|Chương)\s+\d+\s*[:\-]?\s*$", re.IGNORECASE
+)
 
 
-def raw_scan_title(chapter: dict) -> str | None:
-    """Scan 10 dòng đầu của raw_text_content để tìm subtitle.
+def raw_scan_title(chapter: dict, *, subtitle_only: bool = False) -> str | None:
+    """Scan 15 dòng đầu của raw_text_content để tìm chapter title.
 
-    Xử lý trường hợp lightnovelpub/wetriedtls lưu bare title ở line 1,
-    nhưng full title dạng "Chapter N - Subtitle" ở line 3 hoặc 5.
+    subtitle_only=True: chỉ trả phần subtitle, bỏ prefix "Chapter N:".
+    Mặc định giữ nguyên toàn bộ dòng "Chapter N: Subtitle".
     """
     raw = chapter.get("raw_text_content", "") or ""
     if not raw:
         return None
-    for line in raw.split("\n")[:10]:
-        line = line.strip()
-        if not line:
+
+    lines = raw.split("\n")[:15]
+    prev_was_bare_header = False  # dòng trước là "Chương N:" bare
+
+    for i, line in enumerate(lines):
+        line_stripped = line.strip()
+        if not line_stripped:
             continue
-        m = _CHAPTER_WITH_SUBTITLE_RE.match(line)
+
+        # Pattern 3: dòng trước là bare "Chương N:", dòng này là subtitle
+        if prev_was_bare_header and line_stripped:
+            subtitle = line_stripped
+            if is_valid_replacement(subtitle) and subtitle != chapter.get("old_title"):
+                return subtitle
+            prev_was_bare_header = False
+            continue
+
+        # Pattern 3 setup: bare "Chương N:" không có subtitle → check dòng kế
+        if _BARE_CHAPTER_HEADER_RE.match(line_stripped):
+            prev_was_bare_header = True
+            continue
+
+        # Pattern 1: "Chapter N: Subtitle" hoặc "Chương N - Subtitle" trên cùng dòng
+        m = _CHAPTER_WITH_SUBTITLE_RE.match(line_stripped)
         if m:
             subtitle = m.group(1).strip()
-            # Tránh "Chapter N: Chapter N - Subtitle" (nested prefix)
+            # Tránh nested: "Chapter N: Chapter N - Subtitle"
             inner = _CHAPTER_WITH_SUBTITLE_RE.match(subtitle)
             if inner:
-                return subtitle.strip()  # unwrap: lấy phần "Chapter N - Subtitle"
-            return line.strip()  # giữ full "Chapter N - Subtitle"
+                result = subtitle.strip()
+            elif subtitle_only:
+                result = subtitle
+            else:
+                result = line_stripped
+            if result and is_valid_replacement(result) and result != chapter.get("old_title"):
+                return result
+            continue
+
+        # Pattern 2: "Story title chương N: Subtitle" (không bắt đầu bằng Chapter/Chương)
+        # Chỉ áp dụng nếu dòng không quá dài (tránh parse nhầm câu chuyện)
+        if len(line_stripped) < 200:
+            m2 = _INLINE_CHAPTER_RE.search(line_stripped)
+            if m2:
+                subtitle = m2.group(1).strip()
+                if subtitle and is_valid_replacement(subtitle) and subtitle != chapter.get("old_title"):
+                    return subtitle if subtitle_only else line_stripped
+
+        prev_was_bare_header = False
+
     return None
 
 
@@ -590,7 +643,7 @@ def run(args: argparse.Namespace) -> None:
 
             # Strategy 0: raw-scan (no HTTP, always try first)
             if new_title is None:
-                candidate = raw_scan_title(ch)
+                candidate = raw_scan_title(ch, subtitle_only=getattr(args, "subtitle_only", False))
                 if candidate and is_valid_replacement(candidate) and candidate != old_title:
                     new_title = candidate
                     strategy_used = "raw-scan"
@@ -680,7 +733,8 @@ def main() -> None:
     parser.add_argument("--translate", action="store_true", help="Dịch EN/KO titles sang tiếng Việt")
     parser.add_argument("--include-artifacts", action="store_true", help="Bao gồm cả LLM artifact titles")
     parser.add_argument("--fix-files", action="store_true", help="Fix text files từ DB titles (legacy mode)")
-    parser.add_argument("--limit", type=int, default=1000, help="Số chapters tối đa (default: 1000)")
+    parser.add_argument("--limit", type=int, default=50000, help="Số chapters tối đa (default: 50000)")
+    parser.add_argument("--subtitle-only", action="store_true", help="raw-scan: chỉ lấy phần subtitle, bỏ prefix 'Chapter N:'")
     parser.add_argument("--delay", type=float, default=0.5, help="Delay giữa HTTP requests (default: 0.5s)")
     parser.add_argument(
         "--ollama-url",

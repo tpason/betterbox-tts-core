@@ -177,6 +177,7 @@ _POLISH_GENRE_ADDENDUM: dict[str, str] = {
     GENRE_TIEN_HIEP: """\
 Thể loại: Tiên hiệp / Tu tiên / Xianxia.
 - Văn phong cổ phong có khí thế; từ Hán Việt trang trọng nhưng không nặng nề, không khó nghe.
+- Thuật ngữ tu tiên (tên công pháp, bí kíp, tông môn, địa danh, pháp bảo) phải dùng âm Hán Việt — KHÔNG dịch nghĩa từng chữ. Nếu bản dịch gốc có lỗi dịch nghĩa (VD: "pháp kiếm cửa trời"), sửa lại thành Hán Việt đúng ("Thiên Môn Kiếm Pháp").
 - Cảnh tu luyện và đột phá: câu dài tả khí tức, ánh sáng, cảm giác linh lực; kết bằng câu ngắn mạnh mẽ để nhấn cao trào.
 - Cảnh chiến đấu: câu ngắn, nhịp nhanh, động từ mạnh (vung, chém, xé, bùng, vỡ...); tượng thanh cho âm thanh chiến đấu.
 - Cảnh tả phong cảnh: có chiều sâu, chi tiết về màu sắc, ánh sáng, khí tức; không liệt kê khô khan.
@@ -260,6 +261,7 @@ Thể loại: Fantasy phương Tây / Korean light novel.
     GENRE_KOREAN_CULTIVATION: """\
 Thể loại: Tu tiên Hàn Quốc (Korean cultivation) — thuật ngữ tu luyện Hán Việt + văn kể hiện đại Korean LN. Các quy tắc sau ghi đè quy tắc chung khi mâu thuẫn:
 - THUẬT NGỮ TU LUYỆN BẮT BUỘC dùng âm Hán Việt chuẩn của truyện tu tiên: cảnh giới, công pháp, pháp bảo, tông môn, bí kíp. KHÔNG dịch nghĩa từng chữ ("Tam Hoa Tụ Đỉnh" — KHÔNG phải "ba hoa hội tụ đỉnh cao"; "Ngũ Khí Triều Nguyên" — KHÔNG phải "năm năng lực hợp nhất về nguồn").
+- Kỹ năng/công pháp KHÔNG có trong glossary: phiên âm Hán Việt từng chữ, KHÔNG dịch nghĩa. VD: 天門劍法 → Thiên Môn Kiếm Pháp (không phải "pháp kiếm cửa trời"); 虛空斬 → Hư Không Trảm (không phải "chém hư không"). Giữ nguyên âm Hán Việt trang trọng như tiên hiệp cổ phong.
 - Tên bí kíp/sách/công pháp: Hán Việt trang trọng, có thể đặt trong 《 》("Siêu Việt Tu Chân Lục" — KHÔNG phải "Kỷ Lục Vượt Qua Tu Chân").
 - "cultivator" = "tu sĩ" (KHÔNG phải "tu luyện giả"); giữ nhất quán: linh khí, linh căn, tu vi, cảnh giới, đan dược, kiếm ý, đạo tâm.
 - VĂN KỂ ngôi 3 vẫn hiện đại kiểu Korean LN: "anh ta", "cô ta", "cậu", tên nhân vật — tránh "hắn/nàng/lão/y" trừ khi character map chỉ định. Ngôi 1: "tôi".
@@ -278,6 +280,10 @@ Thể loại: Tiên hiệp / Tu tiên / Xianxia.
 - Dùng âm Hán Việt chuẩn cho cảnh giới tu luyện: 炼气(期) → Luyện Khí (kỳ), 筑基 → Trúc Cơ, 金丹 → Kim Đan, 元婴 → Nguyên Anh, 化神 → Hóa Thần, 炼虚 → Luyện Hư, 合体 → Hợp Thể, 大乘 → Đại Thừa, 渡劫 → Độ Kiếp, 散仙 → Tán Tiên, 地仙 → Địa Tiên, 天仙 → Thiên Tiên.
 - Tên tông môn, phái, địa danh: âm Hán Việt. Ví dụ: 天剑宗 → Thiên Kiếm Tông, 青云门 → Thanh Vân Môn.
 - Công pháp, pháp bảo, pháp khí, thần thông giữ âm Hán Việt khi có thể đọc được.
+- Thuật ngữ tu tiên KHÔNG có trong glossary: phiên âm Hán Việt từng chữ, KHÔNG dịch nghĩa từng chữ.
+  Ví dụ đúng: 天门剑法 → Thiên Môn Kiếm Pháp | 虚空斩 → Hư Không Trảm | 青龙拳 → Thanh Long Quyền
+  Ví dụ sai:  天门剑法 → "pháp kiếm cửa trời" | 虚空斩 → "chém hư không" | 青龙拳 → "quyền rồng xanh"
+  Tên kỹ năng tiếng Anh không có trong glossary: dịch sang Hán Việt tương đương nếu là khái niệm tu tiên (Foundation Establishment → Trúc Cơ, không phải "Thiết Lập Nền Móng").
 - Giữ sắc thái trang nghiêm, cổ phong. Ngôi kể thứ ba: "hắn", "nàng", "lão", "y", "gã".
 - Không hiện đại hóa từ thuộc bối cảnh tu tiên. Không dùng "anh ấy", "cô ấy" thay thế.\
 """,
@@ -369,9 +375,11 @@ Thể loại: Tu tiên Hàn Quốc (Korean cultivation) — thuật ngữ tu luy
   Sword Intent → Kiếm Ý | Dao Heart → Đạo Tâm | tribulation → thiên kiếp/độ kiếp | elixir/pill → đan dược
   sect → tông môn/môn phái | technique/art → công pháp/võ công | artifact → pháp bảo/pháp khí
 - Tên bí kíp/sách/công pháp/tông môn: dịch Hán Việt trang trọng theo nghĩa ("Transcendent Cultivation Record" → "Siêu Việt Tu Chân Lục"; "Absolute Martial Sect" → "Tuyệt Võ Môn") — KHÔNG dịch word-by-word thành cụm thuần Việt lủng củng.
+- Thuật ngữ tu tiên KHÔNG có trong glossary (gặp trong text tiếng Anh, Hàn hoặc Hán): phiên âm Hán Việt từng chữ, KHÔNG dịch nghĩa. VD: 天門劍法 → Thiên Môn Kiếm Pháp (không phải "pháp kiếm cửa trời"); "Void Slash" → Hư Không Trảm (không phải "Chém Hư Không"); "Thunder Dragon Fist" → Lôi Long Quyền (không phải "Quyền Rồng Sấm").
 - Thuật ngữ đã dùng ở đoạn trước/character map: giữ nguyên y hệt, không đổi cách gọi giữa các đoạn.
 - VĂN KỂ ngôi 3 hiện đại kiểu Korean LN: "anh ta", "cô ta", "cậu", tên nhân vật — tránh "hắn/nàng/lão/y" trừ khi character map chỉ định. Ngôi 1 (truyện kể ngôi nhất): "tôi".
-- Lời thoại thù địch: "mày", "tên kia" hoặc lược đại từ; tự xưng "ta"/"tao". CHỈ dùng "ngươi/mi" cho nhân vật cổ phong/tu sĩ tiền bối thực sự nói giọng cổ.
+- Lời thoại thân thiện/trung tính: ưu tiên "cậu", "anh", "em" thay vì "bạn" — "bạn" nghe như dịch máy trong bối cảnh tu tiên, làm mất không khí. Dùng "bạn" CHỈ khi nhân vật rõ ràng đang nói chuyện rất bình thường trong cảnh đời thực hiện đại.
+- Lời thoại thù địch: "mày", "tên kia" hoặc lược đại từ; tự xưng "ta"/"tao". CHỈ dùng "ngươi/mi" cho nhân vật cổ phong/tu sĩ tiền bối thực sự nói giọng cổ; TUYỆT ĐỐI không dùng "ngươi/mi" trong cảnh văn phòng/hiện đại.
 - Tên người Hàn giữ phiên âm Hàn (Seo Eun-Hyun, Kim Young-hoon) — KHÔNG Hán Việt hóa tên người, KHÔNG dịch nghĩa tên người.\
 """,
 }
@@ -713,6 +721,10 @@ def _char_map_path_from_db_metadata(story_id: str) -> str:
         if not content:
             return ""
         tmp_path = Path(f"/tmp/betterbox_char_map_{story_id}.txt")
+        # Reuse nếu file còn mới (< 5 phút) để tránh repeated DB read + write mỗi chapter
+        import time as _time
+        if tmp_path.exists() and (_time.time() - tmp_path.stat().st_mtime) < 300:
+            return str(tmp_path)
         tmp_path.write_text(content, encoding="utf-8")
         return str(tmp_path)
     except Exception:
