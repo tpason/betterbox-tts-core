@@ -729,13 +729,26 @@ def crawl_alternate_source(target_story: dict[str, Any], alt_url: str, args: arg
 
     # --- Parallel prefetch ---
     # Pre-download chapter text for all pending chapters using a thread pool.
-    # DB writes and file writes remain sequential after the prefetch phase.
+    # DB writes remain sequential after the prefetch phase.
     prefetched: dict[str, str | Exception] = {}
     if chapter_workers > 1:
+        # Pre-query DB to skip already-downloaded chapters from prefetch
+        already_downloaded: set[int] = set()
+        if not args.overwrite:
+            try:
+                from story_db.story_pipeline_db.db import connect as _db_connect
+                with _db_connect() as _conn:
+                    _rows = _conn.execute(
+                        "SELECT chapter_number FROM chapters WHERE story_id = %s AND is_downloaded = TRUE",
+                        (target_story["id"],),
+                    ).fetchall()
+                    already_downloaded = {int(r["chapter_number"]) for r in _rows}
+            except Exception:
+                pass
         pending_to_fetch = [
             ch for ch in chapters
             if args.overwrite
-            or not (output_dir / f"chapter{mapped_chapter_number(int(ch.get('number') or 0), args):04d}.txt").exists()
+            or mapped_chapter_number(int(ch.get("number") or 0), args) not in already_downloaded
         ]
         if pending_to_fetch:
             log(f"[PREFETCH] {len(pending_to_fetch)} chapters, workers={chapter_workers} source={source_code}")
@@ -764,9 +777,7 @@ def crawl_alternate_source(target_story: dict[str, Any], alt_url: str, args: arg
         source_number = int(chapter.get("number") or index)
         chapter_number = mapped_chapter_number(source_number, args)
         title = chapter.get("title") or f"Chương {chapter_number}"
-        raw_path = output_dir / f"chapter{chapter_number:04d}.txt"
-        if raw_path.exists() and not args.overwrite:
-            skipped_existing += 1
+        if not args.overwrite:
             db_chapter = upsert_downloaded_chapter(
                 target_story,
                 source_chapter_id=f"{source_code}:{chapter.get('source_chapter_id') or source_number}",
@@ -774,13 +785,15 @@ def crawl_alternate_source(target_story: dict[str, Any], alt_url: str, args: arg
                 title=title,
                 source_url=chapter.get("url") or alt_url,
                 raw_language=raw_language,
-                raw_path=raw_path,
-                raw_text_content=raw_path.read_text(encoding="utf-8"),
+                raw_path=None,
+                raw_text_content=None,
                 volume=chapter.get("volume"),
             )
-            job = enqueue_polish_for_args(source_code, target_story, db_chapter, target_slug, raw_path, raw_language, job_args)
-            maybe_process_polish_inline(job, args)
-            continue
+            if db_chapter.get("is_downloaded"):
+                skipped_existing += 1
+                job = enqueue_polish_for_args(source_code, target_story, db_chapter, target_slug, None, raw_language, job_args)
+                maybe_process_polish_inline(job, args)
+                continue
         try:
             chapter_url = chapter.get("url") or ""
             if not chapter_url:
@@ -799,8 +812,6 @@ def crawl_alternate_source(target_story: dict[str, Any], alt_url: str, args: arg
                 log(f"[SKIP] short/empty source={source_code} chapter={chapter_number} url={chapter_url}")
                 continue
             text = f"{title}\n\n{content}".strip() + "\n"
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-            raw_path.write_text(text, encoding="utf-8")
             db_chapter = upsert_downloaded_chapter(
                 target_story,
                 source_chapter_id=f"{source_code}:{chapter.get('source_chapter_id') or source_number}",
@@ -808,11 +819,11 @@ def crawl_alternate_source(target_story: dict[str, Any], alt_url: str, args: arg
                 title=title,
                 source_url=chapter_url,
                 raw_language=raw_language,
-                raw_path=raw_path,
+                raw_path=None,
                 raw_text_content=text,
                 volume=chapter.get("volume"),
             )
-            job = enqueue_polish_for_args(source_code, target_story, db_chapter, target_slug, raw_path, raw_language, job_args)
+            job = enqueue_polish_for_args(source_code, target_story, db_chapter, target_slug, None, raw_language, job_args)
             maybe_process_polish_inline(job, args)
             imported += 1
             log(f"[OK] {target_slug} chapter={chapter_number} from={source_code} source_chapter={source_number}")

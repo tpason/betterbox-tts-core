@@ -852,16 +852,14 @@ def unload_ollama_model(base_url: str, model: str) -> None:
 
 def update_char_map_metadata(
     story_id: str,
-    out_path: Path,
+    content: str,
     chapter_nums: list[int],
     text_source: str,
 ) -> None:
     if not chapter_nums:
         return
     try:
-        content = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
         metadata: dict[str, Any] = {
-            "char_map_path": out_path.relative_to(ROOT).as_posix(),
             "char_map_updated_to_chapter": chapter_nums[-1],
             "char_map_scanned_from_chapter": chapter_nums[0],
             "char_map_scanned_to_chapter": chapter_nums[-1],
@@ -973,30 +971,33 @@ def main() -> None:
         f"({chapter_range}), slug={slug}, text_source={text_source}"
     )
 
-    # Output path
-    if args.output_file:
-        out_path = Path(args.output_file)
-    else:
-        out_path = ROOT / "story_data" / "char_maps" / f"{story_id}-{slug}.txt"
-
-    # Load existing char map
+    # Load existing char map from DB
     existing_content = ""
     existing_chars: dict[str, dict[str, Any]] = {}
-    if out_path.exists():
-        existing_content = out_path.read_text(encoding="utf-8")
+    if args.output_file and Path(args.output_file).exists():
+        existing_content = Path(args.output_file).read_text(encoding="utf-8")
+        print(f"[EXIST] --output-file {args.output_file} — {len(parse_existing_char_map(existing_content))} nhân vật đã có")
+    else:
+        try:
+            story_meta = (repo.get_story_by_id(story_id) or {}).get("metadata") or {}
+            existing_content = story_meta.get("char_map_content") or ""
+        except Exception as exc:
+            print(f"[WARN] Không đọc được char_map_content từ DB: {exc}")
+        if existing_content:
+            print(f"[EXIST] char map in DB — {len(parse_existing_char_map(existing_content))} nhân vật đã có")
+    if existing_content:
         existing_chars = parse_existing_char_map(existing_content)
-        print(f"[EXIST] {out_path} — {len(existing_chars)} nhân vật đã có")
 
     if args.validate:
         from genre_prompts import validate_char_map
         if not existing_content:
-            print(f"[VALIDATE] Không có char map tại {out_path}")
+            print(f"[VALIDATE] Không có char map trong DB story_id={story_id}")
             return
         issues = validate_char_map(existing_content)
         if not issues:
-            print(f"[VALIDATE] OK — không phát hiện issue nào ({out_path})")
+            print(f"[VALIDATE] OK — không phát hiện issue nào (story_id={story_id})")
         else:
-            print(f"[VALIDATE] {len(issues)} issue(s) trong {out_path}:")
+            print(f"[VALIDATE] {len(issues)} issue(s) story_id={story_id}:")
             for issue in issues:
                 print(f"  - {issue}")
         return
@@ -1015,7 +1016,7 @@ def main() -> None:
     if not candidates:
         print("[WARN] Không tìm được candidate nào.")
         if existing_content:
-            update_char_map_metadata(story_id, out_path, chapter_nums, text_source)
+            update_char_map_metadata(story_id, existing_content, chapter_nums, text_source)
         return
 
     # ── Pass 2 ────────────────────────────────────────────────────────────────
@@ -1039,7 +1040,7 @@ def main() -> None:
     if not new_chars:
         print("[WARN] LLM không xác định được nhân vật nào.")
         if existing_content:
-            update_char_map_metadata(story_id, out_path, chapter_nums, text_source)
+            update_char_map_metadata(story_id, existing_content, chapter_nums, text_source)
         return
 
     # Format & write
@@ -1059,12 +1060,15 @@ def main() -> None:
             genre=getattr(args, "genre", ""),
         )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(output_content, encoding="utf-8")
+    if args.output_file:
+        out_path = Path(args.output_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(output_content, encoding="utf-8")
+        print(f"[SAVED] {out_path}")
 
-    update_char_map_metadata(story_id, out_path, chapter_nums, text_source)
+    update_char_map_metadata(story_id, output_content, chapter_nums, text_source)
 
-    print(f"[SAVED] {out_path}")
+    print(f"[SAVED] char_map to DB story_id={story_id}")
     print(f"\nDùng lệnh tiếp theo:")
     print(f'  python scripts/story_pipeline/repolish_story_from_db.py \\')
     print(f'    --story-title "{story_title}" --overwrite')

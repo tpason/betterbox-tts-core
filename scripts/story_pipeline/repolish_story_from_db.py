@@ -26,6 +26,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -263,6 +264,7 @@ def list_candidates(args: argparse.Namespace) -> list[dict[str, Any]]:
             c.raw_text_path,
             c.translated_text_path,
             c.polished_text_path,
+            c.raw_text_content,
             c.translated_text_content,
             c.polished_text_content,
             c.is_downloaded,
@@ -284,14 +286,14 @@ def list_candidates(args: argparse.Namespace) -> list[dict[str, Any]]:
     params: dict[str, Any] = {}
 
     if args.source_vi:
-        # Polish từ raw_text_path (story tiếng Việt gốc hoặc đã dịch lưu vào raw)
-        query += " AND c.raw_text_path IS NOT NULL"
+        # Polish từ raw text (story tiếng Việt gốc)
+        query += " AND c.raw_text_content IS NOT NULL"
     else:
-        # Polish từ translated_text_path (story được dịch từ ngôn ngữ khác)
-        query += " AND (c.translated_text_path IS NOT NULL OR c.translated_text_content IS NOT NULL)"
+        # Polish từ translated text
+        query += " AND c.translated_text_content IS NOT NULL"
 
     if not args.overwrite:
-        query += " AND (c.is_polished = FALSE OR c.polished_text_path IS NULL)"
+        query += " AND c.is_polished = FALSE"
 
     if args.story_id:
         query += " AND s.id = %(story_id)s"
@@ -331,37 +333,28 @@ def process_row(row: dict[str, Any], args: argparse.Namespace, *, index: int, to
     slug = story_slug_from_row(row)
     label = f"[{index}/{total}] {row['source_code']} {slug} chapter{int(row['chapter_number']):04d}"
 
-    # Resolve input path
+    # Resolve input content from DB
     if args.source_vi:
-        input_path = resolve_path(row.get("raw_text_path"))
+        input_content = row.get("raw_text_content") or ""
+        if not input_content:
+            legacy = resolve_path(row.get("raw_text_path"))
+            if legacy and legacy.exists():
+                input_content = legacy.read_text(encoding="utf-8")
     else:
-        input_path = resolve_path(row.get("translated_text_path"))
-        # Fallback: nếu translated_text_path không có file nhưng DB có content → ghi ra temp
-        if (not input_path or not input_path.exists()) and row.get("translated_text_content"):
-            tmp_dir = ROOT / "story_data" / "translated" / slug
-            tmp_dir.mkdir(parents=True, exist_ok=True)
-            raw_name = Path(row.get("raw_text_path") or f"chapter{int(row['chapter_number'])}.txt").name
-            input_path = tmp_dir / raw_name
-            if not input_path.exists() or args.overwrite:
-                input_path.write_text(row["translated_text_content"], encoding="utf-8")
-                log(f"[WRITE] translated content from DB -> {input_path}")
+        input_content = row.get("translated_text_content") or ""
+        if not input_content:
+            legacy = resolve_path(row.get("translated_text_path"))
+            if legacy and legacy.exists():
+                input_content = legacy.read_text(encoding="utf-8")
 
-    if not input_path or not input_path.exists():
-        log(f"[SKIP] {label} — không tìm thấy input file")
+    if not input_content:
+        log(f"[SKIP] {label} — không có input content")
         return False
 
-    # Resolve output path
-    if row.get("polished_text_path") and not args.overwrite:
-        output_path = resolve_path(row["polished_text_path"])
-    else:
-        raw_name = Path(row.get("raw_text_path") or f"chapter{int(row['chapter_number'])}.txt").name
-        output_path = ROOT / args.polished_output_root / slug / raw_name
-
     if args.dry_run:
-        log(f"[DRY] {label} input={input_path} output={output_path}")
+        log(f"[DRY] {label} chars={len(input_content)} model={args.vi_model}")
         return True
 
-    # Auto-resolve char map nếu không chỉ định --char-map-file
     story_id = str(row.get("story_id") or "")
     char_map_by_story = getattr(args, "_char_map_by_story", {}) or {}
     effective_char_map = (
@@ -370,9 +363,18 @@ def process_row(row: dict[str, Any], args: argparse.Namespace, *, index: int, to
         or find_char_map_file(story_id=story_id, slug=slug)
     )
 
-    log(f"[START] {label} input={input_path} model={args.vi_model} prompt={args.prompt_profile}"
+    log(f"[START] {label} chars={len(input_content)} model={args.vi_model} prompt={args.prompt_profile}"
         + (f" char_map={effective_char_map}" if effective_char_map else ""))
+
+    _tmp_input: Path | None = None
+    _tmp_output: Path | None = None
     try:
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(input_content)
+            _tmp_input = Path(f.name)
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            _tmp_output = Path(f.name)
+
         category = str((row.get("story_metadata") or {}).get("category") or row.get("story_category") or "")
         raw_language = str(row.get("raw_language") or row.get("story_language") or "")
         source_code = str(row.get("source_code") or "")
@@ -387,23 +389,21 @@ def process_row(row: dict[str, Any], args: argparse.Namespace, *, index: int, to
 
         model_args = build_model_args(args, genre, story_id=story_id, story_slug_value=slug)
         model_args.char_map_file = effective_char_map
-        polish_file(input_path, output_path, model_args)
+        polish_file(_tmp_input, _tmp_output, model_args)
 
-        polished_content = output_path.read_text(encoding="utf-8") if output_path.exists() else None
+        polished_content = _tmp_output.read_text(encoding="utf-8") if _tmp_output.exists() else None
         if polished_content:
             polished_content = format_polished_content(polished_content, {
                 "chapter_title": row.get("chapter_title") or "",
             })
-            if polished_content:
-                output_path.write_text(polished_content.strip() + "\n", encoding="utf-8")
 
         repo.update_chapter_text_outputs(
             row["chapter_id"],
-            polished_text_path=output_path.as_posix() if output_path.exists() else None,
+            polished_text_path=None,
             polished_text_content=polished_content,
         )
         elapsed = time.monotonic() - started
-        log(f"[DONE] {label} elapsed={elapsed:.1f}s output={output_path}")
+        log(f"[DONE] {label} elapsed={elapsed:.1f}s chars={len(polished_content or '')}")
         return True
     except Exception as exc:
         elapsed = time.monotonic() - started
@@ -411,6 +411,10 @@ def process_row(row: dict[str, Any], args: argparse.Namespace, *, index: int, to
         if args.stop_on_error:
             raise
         return False
+    finally:
+        for _tmp in (_tmp_input, _tmp_output):
+            if _tmp:
+                _tmp.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -604,14 +608,13 @@ def main() -> None:
                 source_code=source_code,
                 char_map_file=char_map_file,
             )
-            input_path = (
-                resolve_path(row.get("raw_text_path")) if args.source_vi
-                else resolve_path(row.get("translated_text_path"))
+            input_chars = len(
+                (row.get("raw_text_content") if args.source_vi else row.get("translated_text_content")) or ""
             )
             log(
                 f"[DRY] [{i}/{len(candidates)}] chapter{int(row['chapter_number']):04d} "
                 f"polished={row.get('is_polished')} genre={genre or '(default)'} "
-                f"char_map={char_map_file or '-'} input={input_path}"
+                f"char_map={char_map_file or '-'} input_chars={input_chars}"
             )
         return
 
