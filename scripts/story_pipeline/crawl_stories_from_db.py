@@ -376,16 +376,15 @@ def enqueue_polish(
     story: dict[str, Any],
     chapter: dict[str, Any],
     slug: str,
-    raw_path: Path | None,
+    raw_path: Path | None = None,
     raw_language: str,
-    polished_root: Path,
+    polished_root: Path | None = None,
     vi_model: str,
     translate_model: str,
     max_attempts: int,
     post_translate: str = "polish",
 ) -> dict[str, Any]:
-    chapter_stem = raw_path.stem if raw_path else f"chapter{chapter['chapter_number']:04d}"
-    polished_path = polished_root / slug / f"{chapter_stem}.txt"
+    chapter_stem = f"chapter{chapter['chapter_number']:04d}"
     model = vi_model if raw_language == "vi" else translate_model
     char_map_file = find_char_map_file(story_id=str(story.get("id") or ""), slug=slug)
     job = repo.enqueue_chapter_job(
@@ -394,8 +393,8 @@ def enqueue_polish(
         story_id=story["id"],
         source_code=source_code,
         model=model,
-        input_path=raw_path.as_posix() if raw_path else "",
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": raw_language,
             "story_slug": slug,
@@ -420,7 +419,7 @@ def enqueue_polish(
         max_attempts=max_attempts,
     )
     mode = post_translate if raw_language.lower() not in {"vi"} else "polish"
-    print(f"[JOB] polish_chapter {job['status']} mode={mode}: {slug}/{chapter_stem}.txt")
+    print(f"[JOB] polish_chapter {job['status']} mode={mode}: {slug}/{chapter_stem}")
     return job
 
 
@@ -438,7 +437,7 @@ def upsert_downloaded_chapter(
     is_locked: bool = False,
     lock_reason: str | None = None,
 ) -> dict[str, Any]:
-    title_fallback = raw_path.stem if raw_path else f"chapter{chapter_number:04d}"
+    title_fallback = f"chapter{chapter_number:04d}"
     return repo.upsert_chapter(
         story["id"],
         {
@@ -450,20 +449,15 @@ def upsert_downloaded_chapter(
             "is_locked": is_locked,
             "lock_reason": lock_reason,
             "raw_language": raw_language,
-            "raw_text_path": raw_path.as_posix() if raw_path and raw_path.exists() else None,
+            "raw_text_path": None,
             "raw_text_content": raw_text_content,
-            "is_downloaded": bool(raw_text_content) or (raw_path.exists() if raw_path else False),
+            "is_downloaded": bool(raw_text_content),
         },
     )
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool, persist: bool = True) -> bool:
-    if not persist:
-        return True
-    if path.exists() and not overwrite:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    # DB-only mode: never write raw text to disk; content lives in raw_text_content column.
     return True
 
 
@@ -1965,8 +1959,7 @@ def crawl_jadescrolls_story(story_row: dict[str, Any], args: argparse.Namespace)
         command.extend(["--max-chapters", str(args.max_chapters)])
     if args.overwrite:
         command.append("--overwrite")
-    if getattr(args, "no_persist_files", False):
-        command.append("--no-write-files")
+    command.append("--no-write-files")
     if args.stop_on_error:
         command.append("--stop-on-error")
     subprocess.run(command, check=True)
@@ -1977,7 +1970,7 @@ def enqueue_polish_for_args(
     story: dict[str, Any],
     db_chapter: dict[str, Any],
     slug: str,
-    raw_path: Path,
+    raw_path: Path | None,
     raw_language: str,
     args: argparse.Namespace,
 ) -> dict[str, Any] | None:
@@ -1988,9 +1981,7 @@ def enqueue_polish_for_args(
         story=story,
         chapter=db_chapter,
         slug=slug,
-        raw_path=raw_path,
         raw_language=raw_language,
-        polished_root=Path(args.polished_output_root),
         vi_model=args.vi_model,
         translate_model=args.translate_model,
         max_attempts=args.polish_max_attempts,
@@ -2240,11 +2231,7 @@ def main() -> None:
     parser.add_argument("--raw-zh-output-root", default="story_data/raw_zh")
     parser.add_argument("--raw-en-output-root", default="story_data/raw_en")
     parser.add_argument("--polished-output-root", default="story_data/polished")
-    parser.add_argument(
-        "--no-persist-files",
-        action="store_true",
-        help="Không ghi file txt ra disk; lưu nội dung trực tiếp vào DB. Job polish sẽ dùng DB content.",
-    )
+    # --no-persist-files is a no-op: DB-only mode is now always active.
     parser.add_argument("--skydemonorder-profile-dir", default=".browser/skydemonorder")
     parser.add_argument("--skydemonorder-headful", action="store_true", help="Mở browser thật để xử lý Cloudflare/login.")
     parser.add_argument("--skydemonorder-manual-wait", type=int, default=0)

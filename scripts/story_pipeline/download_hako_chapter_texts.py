@@ -172,9 +172,12 @@ def emit_polish_job(
     max_attempts: int,
     overwrite: bool,
     char_map_file: str = "",
+    raw_text_content: str | None = None,
 ) -> None:
     from story_db.story_pipeline_db import repository as repo
 
+    chapter_number = int(chapter.get("number") or 0)
+    chapter_stem = f"chapter{chapter_number:04d}"
     repo.upsert_source("hako", "Hako", "https://ln.hako.vn")
     story = repo.upsert_story(
         "hako",
@@ -190,31 +193,24 @@ def emit_polish_job(
             "metadata": {"slug": catalog.get("slug"), "source": "hako"},
         },
     )
+    content = raw_text_content
     db_chapter = repo.upsert_chapter(
         story["id"],
         {
             "source_chapter_id": str(chapter.get("number") or ""),
-            "chapter_number": int(chapter.get("number") or 0),
-            "title": chapter.get("title") or raw_path.stem,
+            "chapter_number": chapter_number,
+            "title": chapter.get("title") or chapter_stem,
             "source_url": chapter.get("url") or "",
             "is_locked": bool(chapter.get("is_locked")),
             "raw_language": "vi",
-            "raw_text_path": raw_path.as_posix(),
-            "raw_text_content": raw_path.read_text(encoding="utf-8") if raw_path.exists() else None,
-            "is_downloaded": True,
+            "raw_text_path": None,
+            "raw_text_content": content,
+            "is_downloaded": bool(content),
         },
     )
 
-    if polished_path.exists() and not overwrite:
-        repo.update_chapter_text_outputs(
-            db_chapter["id"],
-            polished_text_path=polished_path.as_posix(),
-            polished_text_content=polished_path.read_text(encoding="utf-8"),
-        )
-        print(f"[SKIP] DB polish job, polished exists: {polished_path}")
-        return
     if db_chapter.get("is_polished") and not overwrite:
-        print(f"[SKIP] DB polish job, chapter already polished: {raw_path.name}")
+        print(f"[SKIP] DB polish job, chapter already polished: {chapter_stem}")
         return
 
     effective_char_map = char_map_file or find_char_map_file(story_id=str(story["id"]), slug=str(catalog.get("slug") or ""))
@@ -225,8 +221,8 @@ def emit_polish_job(
         story_id=story["id"],
         source_code="hako",
         model=model,
-        input_path=raw_path.as_posix(),
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": "vi",
             "story_slug": catalog.get("slug"),
@@ -241,7 +237,7 @@ def emit_polish_job(
         },
         max_attempts=max_attempts,
     )
-    print(f"[JOB] polish_chapter {job['status']}: {raw_path.name}")
+    print(f"[JOB] polish_chapter {job['status']}: {chapter_stem}")
 
 
 def main() -> None:
@@ -298,21 +294,6 @@ def main() -> None:
 
         output_path = output_dir / chapter_filename(chapter, index)
         polished_path = Path(args.db_polish_output_root) / slug / output_path.name
-        if has_existing_text(output_path) and not args.overwrite:
-            skipped += 1
-            report.append({"url": chapter.get("url"), "path": output_path.as_posix(), "status": "exists"})
-            if args.emit_polish_job:
-                emit_polish_job(
-                    catalog,
-                    chapter,
-                    output_path,
-                    polished_path,
-                    args.db_polish_model,
-                    args.db_polish_max_attempts,
-                    args.overwrite,
-                    effective_char_map,
-                )
-            continue
 
         url = chapter.get("url")
         if not url:
@@ -335,10 +316,10 @@ def main() -> None:
             continue
 
         heading = title or chapter.get("title") or f"Chapter {chapter.get('number') or index}"
-        output_path.write_text(f"{heading}\n\n{content}\n", encoding="utf-8")
+        full_content = f"{heading}\n\n{content}\n"
         downloaded += 1
-        report.append({"url": url, "path": output_path.as_posix(), "status": "downloaded"})
-        print(f"saved {output_path}")
+        report.append({"url": url, "status": "downloaded"})
+        print(f"saved chapter to DB: {output_path.name}")
 
         if args.emit_polish_job:
             emit_polish_job(
@@ -350,6 +331,7 @@ def main() -> None:
                 args.db_polish_max_attempts,
                 args.overwrite,
                 effective_char_map,
+                raw_text_content=full_content,
             )
 
         if args.polish_with_ollama:

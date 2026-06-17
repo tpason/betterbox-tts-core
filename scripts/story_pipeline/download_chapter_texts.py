@@ -103,6 +103,7 @@ def emit_polish_job(
     max_attempts: int,
     overwrite: bool,
     char_map_file: str = "",
+    raw_text_content: str | None = None,
 ) -> None:
     from story_db.story_pipeline_db import repository as repo
 
@@ -122,29 +123,22 @@ def emit_polish_job(
             "metadata": {"slug": slug, "source": "wattpad_vn"},
         },
     )
+    content = raw_text_content or (raw_path.read_text(encoding="utf-8") if raw_path.exists() else None)
     db_chapter = repo.upsert_chapter(
         story["id"],
         {
             "source_chapter_id": str(chapter_number),
             "chapter_number": chapter_number,
-            "title": chapter.get("title") or raw_path.stem,
+            "title": chapter.get("title") or f"chapter{chapter_number:04d}",
             "source_url": chapter.get("url") or "",
             "raw_language": "vi",
-            "raw_text_path": raw_path.as_posix(),
-            "raw_text_content": raw_path.read_text(encoding="utf-8") if raw_path.exists() else None,
-            "is_downloaded": True,
+            "raw_text_path": None,
+            "raw_text_content": content,
+            "is_downloaded": bool(content),
         },
     )
-    if polished_path.exists() and not overwrite:
-        repo.update_chapter_text_outputs(
-            db_chapter["id"],
-            polished_text_path=polished_path.as_posix(),
-            polished_text_content=polished_path.read_text(encoding="utf-8"),
-        )
-        print(f"[SKIP] DB polish job, polished exists: {polished_path}")
-        return
     if db_chapter.get("is_polished") and not overwrite:
-        print(f"[SKIP] DB polish job, chapter already polished: {raw_path.name}")
+        print(f"[SKIP] DB polish job, chapter already polished: chapter{chapter_number:04d}")
         return
     effective_char_map = char_map_file or find_char_map_file(story_id=str(story["id"]), slug=slug)
     category = str(manifest.get("category") or manifest.get("genre") or " ".join(manifest.get("tags") or []))
@@ -154,8 +148,8 @@ def emit_polish_job(
         story_id=story["id"],
         source_code="wattpad_vn",
         model=model,
-        input_path=raw_path.as_posix(),
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": "vi",
             "story_slug": slug,
@@ -170,7 +164,7 @@ def emit_polish_job(
         },
         max_attempts=max_attempts,
     )
-    print(f"[JOB] polish_chapter {job['status']}: {raw_path.name}")
+    print(f"[JOB] polish_chapter {job['status']}: chapter{chapter_number:04d}")
 
 
 def main() -> None:
@@ -217,29 +211,12 @@ def main() -> None:
         chapter_number = int(number)
         polished_path = Path(args.db_polish_output_root) / slug / target_path.name
 
-        if target_path.exists() and not args.overwrite:
-            print(f"[SKIP] {target_path}")
-            if args.emit_polish_job:
-                emit_polish_job(
-                    manifest,
-                    chapter,
-                    chapter_number,
-                    target_path,
-                    polished_path,
-                    args.db_polish_model,
-                    args.db_polish_max_attempts,
-                    args.overwrite,
-                    effective_char_map,
-                )
-            continue
-
         print(f"Đang tải {title}: {url}")
         try:
             content = fetch_chapter_text(url)
             if not content:
                 print(f"[WARN] Nội dung rỗng, bỏ qua chapter {number}")
                 continue
-            target_path.write_text(content, encoding="utf-8")
             saved_count += 1
             if args.emit_polish_job:
                 emit_polish_job(
@@ -252,30 +229,12 @@ def main() -> None:
                     args.db_polish_max_attempts,
                     args.overwrite,
                     effective_char_map,
+                    raw_text_content=content,
                 )
-            if args.polish_with_ollama:
-                polished_path = Path(args.polish_output_root) / slug / target_path.name
-                if polished_path.exists() and not args.overwrite:
-                    print(f"[SKIP] Polished đã tồn tại: {polished_path}")
-                else:
-                    polish_file(
-                        target_path,
-                        polished_path,
-                        Namespace(
-                            ollama_url=args.ollama_url,
-                            model=args.polish_model,
-                            temperature=args.polish_temperature,
-                            num_ctx=args.polish_num_ctx,
-                            timeout=args.polish_timeout,
-                            retries=args.polish_retries,
-                            max_chars_per_chunk=args.polish_max_chars_per_chunk,
-                            char_map_file=effective_char_map,
-                        ),
-                    )
         except Exception as exc:
             print(f"[ERROR] Chapter {number}: {exc}")
 
-    print(f"Hoàn tất. Đã lưu {saved_count} file vào {output_dir}")
+    print(f"Hoàn tất. Đã lưu {saved_count} chapter vào DB")
 
 
 if __name__ == "__main__":

@@ -395,12 +395,7 @@ def chapter_path(root: Path, slug: str, number: int) -> Path:
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool, persist: bool = True) -> bool:
-    if not persist:
-        return True
-    if path.exists() and not overwrite:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    # DB-only mode: never write raw text to disk.
     return True
 
 
@@ -409,11 +404,11 @@ def enqueue_polish_job(
     story: dict[str, Any],
     db_chapter: dict[str, Any],
     slug: str,
-    raw_path: Path,
+    raw_path: Path | None,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     from story_db.story_pipeline_db import repository as repo
-    polished_path = Path(args.polished_output_root) / slug / raw_path.name
+    chapter_stem = f"chapter{db_chapter['chapter_number']:04d}"
     category = str(story.get("category") or " ".join((story.get("metadata") or {}).get("tags") or []))
     char_map_file = find_char_map_file(story_id=str(story.get("id") or ""), slug=slug)
     return repo.enqueue_chapter_job(
@@ -422,20 +417,19 @@ def enqueue_polish_job(
         story_id=story["id"],
         source_code="fanmtl",
         model=args.translate_model,
-        input_path=raw_path.as_posix(),
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": "en",
             "story_slug": slug,
             "chapter_number": db_chapter["chapter_number"],
-            "chapter_title": db_chapter.get("title") or raw_path.stem,
-            "source_chapter_title": db_chapter.get("title") or raw_path.stem,
+            "chapter_title": db_chapter.get("title") or chapter_stem,
+            "source_chapter_title": db_chapter.get("title") or chapter_stem,
             "translate_story_metadata": True,
             "source_story_title": story.get("original_title") or story.get("title") or "",
             "source_story_author": (story.get("metadata") or {}).get("source_author") or story.get("author") or "",
             "source_story_description": (story.get("metadata") or {}).get("source_description") or story.get("description") or "",
             "post_translate": args.post_translate,
-            "translated_text_path": (Path(args.translated_output_root) / slug / raw_path.name).as_posix(),
             "genre": resolve_genre_from_context(
                 category,
                 raw_language="en",
@@ -473,7 +467,7 @@ def download_chapters_to_db(
                     "title": title,
                     "source_url": ch.get("url") or "",
                     "raw_language": "en",
-                    "raw_text_path": raw_path.as_posix(),
+                    "raw_text_path": None,
                     "raw_text_content": content,
                     "is_downloaded": True,
                 },
@@ -504,7 +498,7 @@ def download_chapters_to_db(
                     "title": title,
                     "source_url": ch.get("url") or "",
                     "raw_language": "en",
-                    "raw_text_path": raw_path.as_posix(),
+                    "raw_text_path": None,
                     "raw_text_content": text,
                     "is_downloaded": True,
                 },

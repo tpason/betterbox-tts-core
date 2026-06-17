@@ -99,10 +99,7 @@ def chapter_path(root: Path, slug: str, number: int) -> Path:
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool) -> bool:
-    if path.exists() and not overwrite:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    # DB-only mode: never write raw text to disk.
     return True
 
 
@@ -494,7 +491,6 @@ def run_crawl(args: argparse.Namespace) -> None:
                     title = page_title
 
                 text = f"{title}\n\n{content}".strip() + "\n"
-                raw_path.write_text(text, encoding="utf-8")
                 imported += 1
                 print(f"[OK] ch{ch.number:04d} chars={len(content)} title={title!r}", flush=True)
 
@@ -506,11 +502,11 @@ def run_crawl(args: argparse.Namespace) -> None:
                         title=title,
                         source_url=ch.url,
                         raw_language="en",
-                        raw_path=raw_path,
+                        raw_path=None,
                         raw_text_content=text,
                     )
                     if args.enqueue_polish:
-                        enqueue_polish_for_args("novelfire", story, db_ch, slug, raw_path, "en", args)
+                        enqueue_polish_for_args("novelfire", story, db_ch, slug, None, "en", args)
 
             except PlaywrightTimeoutError as exc:
                 failed += 1

@@ -513,7 +513,6 @@ def enqueue_job(row: dict[str, Any], args: argparse.Namespace, reason: str) -> d
     slug = story_slug(row)
     chapter_num = int(row.get("chapter_number") or 0)
     chapter_stem = Path(row["raw_text_path"]).stem if row.get("raw_text_path") else f"chapter{chapter_num:04d}"
-    polished_path = Path(args.polished_output_root) / slug / f"{chapter_stem}.txt"
     raw_language = likely_raw_language(row)
     char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
         story_id=str(row.get("story_id") or ""),
@@ -531,8 +530,8 @@ def enqueue_job(row: dict[str, Any], args: argparse.Namespace, reason: str) -> d
         story_id=row["story_id"],
         source_code=row["source_code"],
         model=args.translate_model,
-        input_path=row.get("raw_text_path") or "",
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": raw_language,
             "story_slug": slug,
@@ -720,12 +719,11 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
     slug = story_slug(row)
     label = f"[{index}/{total}] {row['source_code']} {slug} chapter{int(row['chapter_number']):04d} reason={reason}"
     _tmp_in = None
+    _tmp_translated: Path | None = None
     try:
         chapter_num = int(row.get("chapter_number") or 0)
         stable_name = Path(row["raw_text_path"]).name if row.get("raw_text_path") else f"chapter{chapter_num:04d}.txt"
         raw_path, _tmp_in = _resolve_raw_input(row)
-        translated_path = Path(args.translated_output_root) / slug / stable_name
-        polished_path = Path(args.polished_output_root) / slug / stable_name
         raw_language = likely_raw_language(row)
         char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
             story_id=str(row.get("story_id") or ""),
@@ -740,34 +738,34 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
         if char_map_file:
             log(f"[CHAR_MAP] {char_map_file}")
 
-        if translated_path.exists() and not args.overwrite_translation:
-            log(f"[SKIP] translated output exists: {translated_path}")
-        else:
-            log(f"[TRANSLATE] start {label} model={args.translate_model} max_chars={args.translate_max_chars_per_chunk}")
-            translate_file(
-                raw_path,
-                translated_path,
-                build_model_args(
-                    args,
-                    args.translate_model,
-                    args.translate_max_chars_per_chunk,
-                    char_map_file,
-                    genre,
-                    story_id=str(row.get("story_id") or ""),
-                    story_slug_value=slug,
-                ),
-            )
-            log(f"[TRANSLATE] done {label} output={translated_path}")
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False,
+                                         prefix=f"translate_{chapter_num:04d}_") as _tf:
+            _tmp_translated = Path(_tf.name)
+        log(f"[TRANSLATE] start {label} model={args.translate_model} max_chars={args.translate_max_chars_per_chunk}")
+        translate_file(
+            raw_path,
+            _tmp_translated,
+            build_model_args(
+                args,
+                args.translate_model,
+                args.translate_max_chars_per_chunk,
+                char_map_file,
+                genre,
+                story_id=str(row.get("story_id") or ""),
+                story_slug_value=slug,
+            ),
+        )
+        log(f"[TRANSLATE] done {label}")
 
         fake_job = {"chapter_id": row["chapter_id"], "story_id": row["story_id"]}
-        translated_text_content = read_formatted_output(translated_path, fake_job, write_back=True, label="translated")
+        translated_text_content = read_formatted_output(_tmp_translated, fake_job, write_back=True, label="translated")
         translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
         if translated_chapter_title:
             log(f"[DB] chapter title translated {label}: {translated_chapter_title}")
 
         repo.update_chapter_text_outputs(
             row["chapter_id"],
-            translated_text_path=translated_path.as_posix(),
+            translated_text_path=None,
             translated_text_content=translated_text_content,
         )
 
@@ -777,11 +775,11 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
             story_id=row["story_id"],
             source_code=row["source_code"],
             model=args.vi_model,
-            input_path=translated_path.as_posix(),
-            output_path=polished_path.as_posix(),
+            input_path=None,
+            output_path=None,
             payload={
                 "raw_language": "vi",
-                "translated_text_path": translated_path.as_posix(),
+                "is_post_translate": True,
                 "story_slug": slug,
                 "chapter_number": row["chapter_number"],
                 "chapter_title": row.get("chapter_title") or Path(stable_name).stem,
@@ -814,11 +812,12 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
             raise
         return False
     finally:
-        if _tmp_in is not None:
-            try:
-                import os; os.unlink(_tmp_in.name)
-            except OSError:
-                pass
+        for _tmp in (_tmp_in, _tmp_translated):
+            if _tmp is not None:
+                try:
+                    import os; os.unlink(_tmp.name if hasattr(_tmp, "name") else str(_tmp))
+                except OSError:
+                    pass
 
 
 def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, index: int, total: int) -> bool:
@@ -849,44 +848,42 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
     job = enqueue_job(row, args, reason)
     log(f"[START] {label} job={job.get('id')} genre={effective_genre or '(default)'}")
     _tmp_in = None
+    _tmp_translated: Path | None = None
+    _tmp_polished: Path | None = None
     try:
         chapter_num = int(row.get("chapter_number") or 0)
         stable_name = Path(row["raw_text_path"]).name if row.get("raw_text_path") else f"chapter{chapter_num:04d}.txt"
         raw_path, _tmp_in = _resolve_raw_input(row)
-        output_path = Path(job["output_path"])
-        translated_path = Path(args.translated_output_root) / story_slug(row) / stable_name
         effective_char_map = (job.get("payload") or {}).get("char_map_file") or getattr(args, "char_map_file", "") or find_char_map_file(
             story_id=str(row.get("story_id") or ""),
             slug=slug,
         )
         if effective_char_map:
             log(f"[CHAR_MAP] {effective_char_map}")
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False,
+                                         prefix=f"translate_{chapter_num:04d}_") as _tf:
+            _tmp_translated = Path(_tf.name)
         log(
-            f"[PATH] {label} raw={raw_path} translated={translated_path} polished={output_path if args.write_polished_copy or args.post_translate == 'polish' else '-'}"
+            f"[TRANSLATE] start {label} model={args.translate_model} "
+            f"max_chars={args.translate_max_chars_per_chunk}"
         )
-        if translated_path.exists() and not args.overwrite_translation:
-            log(f"[SKIP] translated output exists: {translated_path}")
-        else:
-            log(
-                f"[TRANSLATE] start {label} model={args.translate_model} "
-                f"max_chars={args.translate_max_chars_per_chunk}"
-            )
-            translate_file(
-                raw_path,
-                translated_path,
-                build_model_args(
-                    args,
-                    args.translate_model,
-                    args.translate_max_chars_per_chunk,
-                    effective_char_map,
-                    effective_genre,
-                    story_id=str(row.get("story_id") or ""),
-                    story_slug_value=slug,
-                ),
-            )
-            log(f"[TRANSLATE] done {label} output={translated_path}")
+        translate_file(
+            raw_path,
+            _tmp_translated,
+            build_model_args(
+                args,
+                args.translate_model,
+                args.translate_max_chars_per_chunk,
+                effective_char_map,
+                effective_genre,
+                story_id=str(row.get("story_id") or ""),
+                story_slug_value=slug,
+            ),
+        )
+        log(f"[TRANSLATE] done {label}")
         log(f"[FORMAT] translated start {label}")
-        translated_text_content = read_formatted_output(translated_path, job, write_back=True, label="translated")
+        translated_text_content = read_formatted_output(_tmp_translated, job, write_back=True, label="translated")
         log(f"[FORMAT] translated done {label} chars={len(translated_text_content)}")
         translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
         if translated_chapter_title:
@@ -894,27 +891,21 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
 
         polished_text_content = None
         if args.post_translate == "copy" and args.write_polished_copy:
-            if output_path.exists() and not args.overwrite_polish:
-                log(f"[SKIP] polished output exists: {output_path}")
-            else:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(clean_for_audiobook_tts(translated_text_content).strip() + "\n", encoding="utf-8")
-                log(f"[COPY] translated output reused as polished output: {output_path}")
-            log(f"[FORMAT] polished start {label}")
-            polished_text_content = read_formatted_polished_output(output_path, job, write_back=True) if output_path.exists() else None
-            log(f"[FORMAT] polished done {label} chars={len(polished_text_content or '')}")
+            polished_text_content = clean_for_audiobook_tts(translated_text_content).strip() + "\n"
+            log(f"[COPY] translated output reused as polished content chars={len(polished_text_content)}")
         elif args.post_translate == "copy":
             log(f"[SKIP] polished output disabled; translated only")
-        elif output_path.exists() and not args.overwrite_polish:
-            log(f"[SKIP] polished output exists: {output_path}")
         else:
+            with tempfile.NamedTemporaryFile(suffix=".txt", delete=False,
+                                             prefix=f"polish_{chapter_num:04d}_") as _pf:
+                _tmp_polished = Path(_pf.name)
             log(
                 f"[POLISH] start {label} model={args.vi_model} "
                 f"mode={args.polish_mode} max_chars={args.polish_max_chars_per_chunk}"
             )
             polish_file(
-                translated_path,
-                output_path,
+                _tmp_translated,
+                _tmp_polished,
                 build_model_args(
                     args,
                     args.vi_model,
@@ -925,15 +916,15 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
                     story_slug_value=slug,
                 ),
             )
-            log(f"[POLISH] done {label} output={output_path}")
+            log(f"[POLISH] done {label}")
             log(f"[FORMAT] polished start {label}")
-            polished_text_content = read_formatted_polished_output(output_path, job, write_back=True) if output_path.exists() else None
+            polished_text_content = read_formatted_polished_output(_tmp_polished, job, write_back=True) if _tmp_polished.exists() else None
             log(f"[FORMAT] polished done {label} chars={len(polished_text_content or '')}")
         log(f"[DB] update chapter outputs start {label}")
         repo.update_chapter_text_outputs(
             row["chapter_id"],
-            translated_text_path=translated_path.as_posix(),
-            polished_text_path=output_path.as_posix() if polished_text_content is not None and output_path.exists() else None,
+            translated_text_path=None,
+            polished_text_path=None,
             translated_text_content=translated_text_content,
             polished_text_content=polished_text_content,
         )
@@ -941,8 +932,6 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
         repo.complete_story_job(
             job["id"],
             result_payload={
-                "output_path": output_path.as_posix(),
-                "translated_text_path": translated_path.as_posix(),
                 "raw_language": likely_raw_language(row),
                 "translated_chapter_title": translated_chapter_title or None,
                 "translate_from_db_reason": reason,
@@ -960,11 +949,12 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
             raise
         return False
     finally:
-        if _tmp_in is not None:
-            try:
-                import os; os.unlink(_tmp_in.name)
-            except OSError:
-                pass
+        for _tmp in (_tmp_in, _tmp_translated, _tmp_polished):
+            if _tmp is not None:
+                try:
+                    import os; os.unlink(_tmp.name if hasattr(_tmp, "name") else str(_tmp))
+                except OSError:
+                    pass
 
 
 def main() -> None:

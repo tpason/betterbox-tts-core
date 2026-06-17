@@ -420,22 +420,29 @@ def upsert_target_story(page: Any, args: argparse.Namespace, project_slug: str) 
     return story
 
 
-def write_outputs(raw_path: Path, chapter_number: int, args: argparse.Namespace) -> tuple[Path | None, Path | None]:
+def write_outputs(
+    raw_content: str, chapter_number: int, args: argparse.Namespace
+) -> tuple[str | None, str | None]:
+    """Translate and optionally polish inline using tmpfiles. Returns (translated_content, polished_content)."""
     if not args.translate_inline:
         return None, None
-    translated_path = Path(args.translated_output_root) / args.target_slug / f"chapter{chapter_number:04d}.txt"
-    if translated_path.exists() and not args.overwrite_translation:
-        print(f"[SKIP] translated exists: {translated_path}", flush=True)
-    else:
-        translate_file(raw_path, translated_path, build_translate_args(args))
-
-    if args.post_translate == "copy":
-        polished_path = Path(args.polished_output_root) / args.target_slug / translated_path.name
-        polished_path.parent.mkdir(parents=True, exist_ok=True)
-        polished_path.write_text(translated_path.read_text(encoding="utf-8").strip() + "\n", encoding="utf-8")
-        print(f"[COPY] translated -> polished: {polished_path}", flush=True)
-        return translated_path, polished_path
-    return translated_path, None
+    import tempfile as _tempfile
+    _tmp_raw = _tmp_tr = None
+    try:
+        with _tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as f:
+            _tmp_raw = Path(f.name); f.write(raw_content)
+        with _tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            _tmp_tr = Path(f.name)
+        translate_file(_tmp_raw, _tmp_tr, build_translate_args(args))
+        translated_content = _tmp_tr.read_text(encoding="utf-8").strip() + "\n"
+        if args.post_translate == "copy":
+            return translated_content, translated_content
+        return translated_content, None
+    finally:
+        for _p in (_tmp_raw, _tmp_tr):
+            if _p is not None:
+                try: _p.unlink(missing_ok=True)
+                except OSError: pass
 
 
 def maybe_update_chapter_db(
@@ -445,13 +452,12 @@ def maybe_update_chapter_db(
     chapter_number: int,
     title: str,
     source_url: str,
-    raw_path: Path,
-    translated_path: Path | None,
-    polished_path: Path | None,
+    raw_text_content: str,
+    translated_text_content: str | None = None,
+    polished_text_content: str | None = None,
 ) -> None:
     if target_story is None:
         return
-    raw_text = raw_path.read_text(encoding="utf-8")
     db_chapter = upsert_downloaded_chapter(
         target_story,
         source_chapter_id=f"skydemonorder:{chapter_number}",
@@ -459,21 +465,21 @@ def maybe_update_chapter_db(
         title=title,
         source_url=source_url,
         raw_language="en",
-        raw_path=raw_path,
-        raw_text_content=raw_text,
+        raw_path=None,
+        raw_text_content=raw_text_content,
         volume=None,
     )
     repo.update_chapter_text_outputs(
         db_chapter["id"],
-        translated_text_path=translated_path.as_posix() if translated_path else None,
-        polished_text_path=polished_path.as_posix() if polished_path else None,
-        raw_text_content=raw_text,
-        translated_text_content=translated_path.read_text(encoding="utf-8") if translated_path and translated_path.exists() else None,
-        polished_text_content=polished_path.read_text(encoding="utf-8") if polished_path and polished_path.exists() else None,
+        translated_text_path=None,
+        polished_text_path=None,
+        raw_text_content=raw_text_content,
+        translated_text_content=translated_text_content,
+        polished_text_content=polished_text_content,
     )
     print(f"[DB] updated chapter={chapter_number} story_id={target_story['id']}", flush=True)
     if args.enqueue_polish:
-        enqueue_polish_for_args("skydemonorder", target_story, db_chapter, args.target_slug, raw_path, "en", args)
+        enqueue_polish_for_args("skydemonorder", target_story, db_chapter, args.target_slug, None, "en", args)
 
 
 def main() -> None:
@@ -604,42 +610,26 @@ def main() -> None:
                     time.sleep(args.chapter_delay)
                     continue
 
-                raw_path = output_dir / f"chapter{number:04d}.txt"
-                if raw_path.exists() and raw_path.stat().st_size > 0 and not args.overwrite:
-                    skipped += 1
-                    print(f"[SKIP] exists chapter={number} path={raw_path}", flush=True)
-                    translated_path = Path(args.translated_output_root) / args.target_slug / raw_path.name
-                    polished_path = Path(args.polished_output_root) / args.target_slug / raw_path.name
-                    maybe_update_chapter_db(
-                        target_story,
-                        args,
-                        chapter_number=number,
-                        title=title,
-                        source_url=page.url,
-                        raw_path=raw_path,
-                        translated_path=translated_path if translated_path.exists() else None,
-                        polished_path=polished_path if polished_path.exists() else None,
-                    )
-                elif len(content) < args.min_text_chars:
+                if len(content) < args.min_text_chars:
                     skipped += 1
                     print(f"[SKIP] short chapter={number} chars={len(content)} url={page.url}", flush=True)
                 elif looks_blocked(content):
                     skipped += 1
                     print(f"[SKIP] locked/paywall chapter={number} url={page.url}", flush=True)
                 else:
-                    raw_path.write_text(f"{title}\n\n{content}\n", encoding="utf-8")
+                    raw_text = f"{title}\n\n{content}\n"
                     imported += 1
-                    print(f"[OK] chapter={number} chars={len(content)} path={raw_path}", flush=True)
-                    translated_path, polished_path = write_outputs(raw_path, number, args)
+                    print(f"[OK] chapter={number} chars={len(content)}", flush=True)
+                    translated_content, polished_content = write_outputs(raw_text, number, args)
                     maybe_update_chapter_db(
                         target_story,
                         args,
                         chapter_number=number,
                         title=title,
                         source_url=page.url,
-                        raw_path=raw_path,
-                        translated_path=translated_path,
-                        polished_path=polished_path,
+                        raw_text_content=raw_text,
+                        translated_text_content=translated_content,
+                        polished_text_content=polished_content,
                     )
 
                 if args.max_chapters and imported >= args.max_chapters:

@@ -232,16 +232,13 @@ def chapter_file_path(root: Path, slug: str, number: int) -> Path:
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool) -> bool:
-    if path.exists() and not overwrite:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    # DB-only mode: never write raw text to disk.
     return True
 
 
-def enqueue_polish_job(*, story: dict[str, Any], db_chapter: dict[str, Any], slug: str, raw_path: Path, args: argparse.Namespace) -> None:
+def enqueue_polish_job(*, story: dict[str, Any], db_chapter: dict[str, Any], slug: str, raw_path: Path | None = None, args: argparse.Namespace) -> None:
     from story_db.story_pipeline_db import repository as repo
-    polished_path = Path(args.polished_output_root) / slug / raw_path.name
+    chapter_stem = f"chapter{db_chapter['chapter_number']:04d}"
     char_map_file = find_char_map_file(story_id=str(story.get("id") or ""), slug=slug)
     repo.enqueue_chapter_job(
         "polish_chapter",
@@ -249,18 +246,17 @@ def enqueue_polish_job(*, story: dict[str, Any], db_chapter: dict[str, Any], slu
         story_id=story["id"],
         source_code="wetriedtls",
         model=args.translate_model,
-        input_path=raw_path.as_posix(),
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": "en",
             "story_slug": slug,
             "chapter_number": db_chapter["chapter_number"],
-            "chapter_title": db_chapter.get("title") or raw_path.stem,
-            "source_chapter_title": db_chapter.get("title") or raw_path.stem,
+            "chapter_title": db_chapter.get("title") or chapter_stem,
+            "source_chapter_title": db_chapter.get("title") or chapter_stem,
             "translate_story_metadata": True,
             "source_story_title": story.get("original_title") or story.get("title") or "",
             "post_translate": args.post_translate,
-            "translated_text_path": (Path(args.translated_output_root) / slug / raw_path.name).as_posix(),
             "genre": resolve_genre_from_context("", raw_language="en", source_code="wetriedtls", char_map_file=char_map_file),
             "char_map_file": char_map_file,
         },
@@ -272,7 +268,6 @@ def crawl_chapters(story: dict[str, Any], metadata: dict[str, Any], args: argpar
     from story_db.story_pipeline_db import repository as repo
 
     slug = metadata["series_slug"]
-    no_write = getattr(args, "no_write_files", False)
     saved = skipped = failed = locked = 0
 
     chapter_range = range(args.from_chapter or 1, (args.to_chapter or metadata["max_chapter"]) + 1)
@@ -281,28 +276,6 @@ def crawl_chapters(story: dict[str, Any], metadata: dict[str, Any], args: argpar
 
     for number in chapter_range:
         url = f"{BASE_URL}/series/{slug}/chapter-{number}"
-        raw_path = chapter_file_path(Path(args.raw_en_output_root), slug, number)
-
-        # Skip if file already exists and no-overwrite
-        if not no_write and raw_path.exists() and not args.overwrite:
-            content = raw_path.read_text(encoding="utf-8")
-            db_chapter = repo.upsert_chapter(
-                story["id"],
-                {
-                    "source_chapter_id": str(number),
-                    "chapter_number": number,
-                    "title": f"Chapter {number}",
-                    "source_url": url,
-                    "raw_language": "en",
-                    "raw_text_path": raw_path.as_posix(),
-                    "raw_text_content": content,
-                    "is_downloaded": True,
-                },
-            )
-            skipped += 1
-            if args.enqueue_polish:
-                enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, raw_path=raw_path, args=args)
-            continue
 
         try:
             html = fetch_html(url, timeout=args.timeout, retries=args.retries, retry_sleep=args.retry_sleep, session=session)
@@ -330,26 +303,20 @@ def crawl_chapters(story: dict[str, Any], metadata: dict[str, Any], args: argpar
             full_title = f"{chapter_name}: {chapter_title}" if chapter_title else chapter_name
             text = f"{full_title}\n\n{content}".strip() + "\n"
 
-            chapter_payload: dict[str, Any] = {
+            db_chapter = repo.upsert_chapter(story["id"], {
                 "source_chapter_id": str(number),
                 "chapter_number": number,
                 "title": full_title,
                 "source_url": url,
                 "raw_language": "en",
+                "raw_text_path": None,
                 "raw_text_content": text,
                 "is_downloaded": True,
-            }
-            if no_write:
-                print(f"[TEXT] db-only ch{number:04d} title={full_title!r} chars={len(text)}", flush=True)
-            else:
-                write_if_needed(raw_path, text, args.overwrite)
-                chapter_payload["raw_text_path"] = raw_path.as_posix()
-                print(f"[TEXT] saved ch{number:04d}: {raw_path}", flush=True)
-
-            db_chapter = repo.upsert_chapter(story["id"], chapter_payload)
+            })
             saved += 1
+            print(f"[TEXT] db-only ch{number:04d} title={full_title!r} chars={len(text)}", flush=True)
             if args.enqueue_polish:
-                enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, raw_path=raw_path, args=args)
+                enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, args=args)
 
         except Exception as exc:
             failed += 1

@@ -1006,7 +1006,9 @@ def _resolve_input_for_polish(job: dict) -> tuple[Path, bool]:
     # Only use translated_text_content for the post-translate case to avoid polishing
     # untranslated source text.
     raw_language = (payload.get("raw_language") or "vi").lower()
-    is_post_translate = raw_language == "vi" and bool(payload.get("translated_text_path"))
+    is_post_translate = raw_language == "vi" and bool(
+        payload.get("is_post_translate") or payload.get("translated_text_path")
+    )
     if is_post_translate:
         content = repo.get_chapter_translated_content(job["chapter_id"])
         content_label = "translated_text_content"
@@ -1495,8 +1497,8 @@ def main() -> None:
     parser.add_argument(
         "--single-pass-num-ctx",
         type=int,
-        default=6144,
-        help="num_ctx cho single-pass mode (default 6144; monitor [TOKENS] log để điều chỉnh).",
+        default=8192,
+        help="num_ctx cho single-pass mode (default 8192; single-pass có prompt lớn nhất — translate+polish+story memory).",
     )
     parser.add_argument(
         "--single-pass-max-chars-per-chunk",

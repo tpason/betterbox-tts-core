@@ -380,17 +380,12 @@ def chapter_path(root: Path, slug: str, chapter_number: int) -> Path:
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool, *, persist: bool = True) -> bool:
-    if not persist:
-        return True
-    if path.exists() and not overwrite:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    # DB-only mode: never write raw text to disk.
     return True
 
 
 def should_write_files(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, "write_files", False)) and not bool(getattr(args, "no_write_files", False))
+    return False
 
 
 def download_chapters_to_db(story: dict[str, Any], catalog: dict[str, Any], args: argparse.Namespace) -> dict[str, int]:

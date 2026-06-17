@@ -407,10 +407,7 @@ def chapter_path(root: Path, slug: str, chapter_number: int) -> Path:
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool) -> bool:
-    if path.exists() and not overwrite:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.strip() + "\n", encoding="utf-8")
+    # DB-only mode: never write raw text to disk.
     return True
 
 
@@ -440,12 +437,12 @@ def enqueue_polish_job(
     story: dict[str, Any],
     db_chapter: dict[str, Any],
     slug: str,
-    raw_path: Path,
+    raw_path: Path | None = None,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     from story_db.story_pipeline_db import repository as repo
 
-    polished_path = Path(args.polished_output_root) / slug / raw_path.name
+    chapter_stem = f"chapter{db_chapter['chapter_number']:04d}"
     category = str(story.get("category") or " ".join((story.get("metadata") or {}).get("tags") or []))
     char_map_file = find_char_map_file(story_id=str(story.get("id") or ""), slug=slug)
     return repo.enqueue_chapter_job(
@@ -454,14 +451,14 @@ def enqueue_polish_job(
         story_id=story["id"],
         source_code="lightnovelpub",
         model=args.translate_model,
-        input_path=raw_path.as_posix(),
-        output_path=polished_path.as_posix(),
+        input_path=None,
+        output_path=None,
         payload={
             "raw_language": "en",
             "story_slug": slug,
             "chapter_number": db_chapter["chapter_number"],
-            "chapter_title": db_chapter.get("title") or raw_path.stem,
-            "source_chapter_title": db_chapter.get("title") or raw_path.stem,
+            "chapter_title": db_chapter.get("title") or chapter_stem,
+            "source_chapter_title": db_chapter.get("title") or chapter_stem,
             "translate_story_metadata": True,
             "source_story_title": story.get("original_title") or story.get("title") or "",
             "source_story_author": (story.get("metadata") or {}).get("source_author") or story.get("author") or "",
@@ -469,7 +466,6 @@ def enqueue_polish_job(
             or story.get("description")
             or "",
             "post_translate": args.post_translate,
-            "translated_text_path": (Path(args.translated_output_root) / slug / raw_path.name).as_posix(),
             "genre": resolve_genre_from_context(
                 category,
                 raw_language="en",
@@ -494,28 +490,6 @@ def download_chapters_to_db(story: dict[str, Any], catalog: dict[str, Any], args
         number = int(chapter.get("number") or index)
         raw_path = chapter_path(Path(args.raw_en_output_root), slug, number)
         title = chapter.get("title") or f"Chapter {number}"
-        no_write = getattr(args, "no_write_files", False)
-        if raw_path.exists() and not args.overwrite and not no_write:
-            content = raw_path.read_text(encoding="utf-8")
-            db_chapter = repo.upsert_chapter(
-                story["id"],
-                {
-                    "source_chapter_id": str(chapter.get("source_chapter_id") or number),
-                    "chapter_number": number,
-                    "title": title,
-                    "source_url": chapter.get("url") or "",
-                    "raw_language": "en",
-                    "raw_text_path": raw_path.as_posix(),
-                    "raw_text_content": content,
-                    "is_downloaded": True,
-                },
-            )
-            skipped += 1
-            if args.enqueue_polish:
-                enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, raw_path=raw_path, args=args)
-                jobs += 1
-            continue
-
         try:
             raw_html = fetch_html(
                 chapter["url"],
@@ -538,25 +512,20 @@ def download_chapters_to_db(story: dict[str, Any], catalog: dict[str, Any], args
                 if page_title:
                     title = page_title
             text = f"{title}\n\n{content}".strip() + "\n"
-            chapter_payload: dict[str, Any] = {
+            db_chapter = repo.upsert_chapter(story["id"], {
                 "source_chapter_id": str(chapter.get("source_chapter_id") or number),
                 "chapter_number": number,
                 "title": title,
                 "source_url": chapter.get("url") or "",
                 "raw_language": "en",
+                "raw_text_path": None,
                 "raw_text_content": text,
                 "is_downloaded": True,
-            }
-            if no_write:
-                print(f"[TEXT] db-only {slug}/chapter{number:04d}: {len(text)} chars")
-            else:
-                write_if_needed(raw_path, text, args.overwrite)
-                chapter_payload["raw_text_path"] = raw_path.as_posix()
-                print(f"[TEXT] saved {slug}/chapter{number:04d}: {raw_path}")
-            db_chapter = repo.upsert_chapter(story["id"], chapter_payload)
+            })
             saved += 1
+            print(f"[TEXT] db-only {slug}/chapter{number:04d}: {len(text)} chars")
             if args.enqueue_polish:
-                enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, raw_path=raw_path, args=args)
+                enqueue_polish_job(story=story, db_chapter=db_chapter, slug=slug, args=args)
                 jobs += 1
         except Exception as exc:
             failed += 1

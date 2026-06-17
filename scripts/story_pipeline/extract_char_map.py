@@ -686,10 +686,6 @@ def _extract_char_notes(content: str, char_name: str) -> str:
 
 # ── Incremental (per-chapter) update ──────────────────────────────────────────
 
-def _default_char_map_path(story_id: str, slug: str) -> Path:
-    return ROOT / "story_data" / "char_maps" / f"{story_id}-{slug}.txt"
-
-
 # Lightweight prompt dùng cho incremental extraction (1 chapter).
 # Ngắn hơn EXTRACT_USER để giảm latency, không cần /no_think vì qwen3 đã đủ nhanh.
 _INC_EXTRACT_USER = """Đọc đoạn truyện sau (chapter {chapter_num}) và liệt kê nhân vật CÓ TÊN RIÊNG xuất hiện.
@@ -750,9 +746,12 @@ def update_char_map_incremental(
     if not chapter_text or len(chapter_text.strip()) < 200:
         return False
 
-    out_path = Path(char_map_path) if char_map_path else _default_char_map_path(story_id, slug)
-
-    existing_content = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+    from story_db.story_pipeline_db import repository as repo
+    try:
+        story_meta = (repo.get_story_by_id(story_id) or {}).get("metadata") or {}
+        existing_content = story_meta.get("char_map_content") or ""
+    except Exception:
+        existing_content = ""
     existing_chars = parse_existing_char_map(existing_content) if existing_content else {}
 
     # Liệt kê tên đã biết để model không extract lại
@@ -821,17 +820,11 @@ def update_char_map_incremental(
             genre=genre,
         )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(updated_content, encoding="utf-8")
-
     try:
-        metadata_update: dict[str, Any] = {
+        repo.update_story_metadata(story_id, {
             "char_map_updated_to_chapter": chapter_num,
             "char_map_content": updated_content,
-        }
-        if not existing_content:
-            metadata_update["char_map_path"] = out_path.relative_to(ROOT).as_posix()
-        repo.update_story_metadata(story_id, metadata_update)
+        })
     except Exception as exc:
         print(f"[CHAR_MAP_INC] DB metadata failed: {exc}")
 
@@ -964,21 +957,19 @@ def main() -> None:
         f"| model={args.model} | ollama={args.ollama_url}"
     )
 
-    # Resolve output path
-    if args.output_file:
-        out_path = Path(args.output_file)
-    else:
-        out_path = ROOT / "story_data" / "char_maps" / f"{story_id}-{slug}.txt"
-
-    # Load existing char map nếu có
+    # Load existing char map from DB
     existing_content = ""
     existing_chars: dict[str, dict[str, Any]] = {}
-    if out_path.exists():
-        existing_content = out_path.read_text(encoding="utf-8")
+    try:
+        story_meta = (repo.get_story_by_id(story_id) or {}).get("metadata") or {}
+        existing_content = story_meta.get("char_map_content") or ""
+    except Exception as exc:
+        print(f"[WARN] Không đọc được char_map_content từ DB: {exc}")
+    if existing_content:
         existing_chars = parse_existing_char_map(existing_content)
-        print(f"[EXIST] char map: {out_path} ({len(existing_chars)} nhân vật)")
+        print(f"[EXIST] char map in DB ({len(existing_chars)} nhân vật)")
     else:
-        print(f"[NEW] char map sẽ được tạo mới: {out_path}")
+        print("[NEW] char map sẽ được tạo mới trong DB")
 
     # Extract characters from each sampled chapter
     all_chars: dict[str, dict[str, Any]] = dict(existing_chars)
@@ -1044,14 +1035,11 @@ def main() -> None:
         print(output_content)
         return
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(output_content, encoding="utf-8")
     coverage_nums = successful_nums or sampled_nums
     try:
         repo.update_story_metadata(
             story_id,
             {
-                "char_map_path": out_path.relative_to(ROOT).as_posix(),
                 "char_map_content": output_content,
                 "char_map_updated_to_chapter": max(coverage_nums),
                 "char_map_query_from_chapter": chapter_nums[0],
@@ -1065,11 +1053,11 @@ def main() -> None:
         )
     except Exception as exc:
         print(f"[DB WARN] Không cập nhật được story metadata char map: {exc}")
-    print(f"[SAVED] {out_path}")
+    print(f"[SAVED] char_map for story_id={story_id} to DB")
     print(f"\nDùng lệnh tiếp theo:")
     print(f"  python scripts/story_pipeline/repolish_story_from_db.py \\")
     print(f'    --story-title "{story_title}" --overwrite')
-    print(f"  (char map sẽ được auto-resolve từ {out_path.name})")
+    print(f"  (char map sẽ được auto-resolve từ DB story_id={story_id})")
 
 
 if __name__ == "__main__":
