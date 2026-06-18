@@ -1437,7 +1437,7 @@ def update_chapter_audio_by_polished_path(
         return dict(row) if row is not None else None
 
 
-def list_pending_chapter_audio_segments(chapter_id: str, *, voice_key: str = "viterbox_default") -> list[dict[str, Any]]:
+def list_pending_chapter_audio_segments(chapter_id: str, *, voice_key: str = "xianxia_story_male") -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """
@@ -1453,7 +1453,7 @@ def list_pending_chapter_audio_segments(chapter_id: str, *, voice_key: str = "vi
         return [dict(row) for row in rows]
 
 
-def list_all_chapter_audio_segments(chapter_id: str, *, voice_key: str = "viterbox_default") -> list[dict[str, Any]]:
+def list_all_chapter_audio_segments(chapter_id: str, *, voice_key: str = "xianxia_story_male") -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """

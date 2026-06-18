@@ -16,4 +16,4 @@ PYTHON=/home/yuki/Desktop/python/BetterBox-TTS/viterbox/venv/bin/python
 30 */6 * * * cd $PROJECT && mkdir -p story_db/logs && flock -n /tmp/betterbox_crawl_stories.lock $PYTHON scripts/story_pipeline/crawl_stories_from_db.py --sources truyenfull_today royalroad --only-incomplete --min-catalog-check-hours 6 --workers 2 --chapter-delay 1.5 >> story_db/logs/crawl_stories.log 2>&1
 
 # Audio is intentionally not auto-enqueued by cron to avoid filling the disk.
-# Enqueue audio manually for a selected story/chapter range, then keep audio_worker_viterbox.py running.
+# Enqueue audio manually for a selected story/chapter range, then keep audio_worker_vieneu.py running.

@@ -2,7 +2,7 @@
 """
 Audio quality gate: batch-analyze generated WAV files, optionally re-enqueue bad chapters.
 
-NOTE: For new chapters the quality gate is built into audio_worker_viterbox.py — each chapter
+NOTE: For new chapters the quality gate is built into audio_worker_vieneu.py — each chapter
 is automatically re-synthesized inline if quality checks fail (up to --max-quality-retries times).
 
 This script is for *post-hoc* batch repair of already-generated chapters that bypassed the
@@ -30,7 +30,7 @@ Usage:
     --audio-dir story_audio/<slug> \\
     --polished-dir story_data/polished/<slug> \\
     --auto-regen \\
-    --reference-audio wavs/vieneu_alloy1512_1005.wav
+    --voice-profile xianxia_story_male
 """
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ from scripts.story_pipeline.audio_quality import (
     count_words,
     fmt_duration,
 )
+from scripts.story_pipeline.vieneu_voice_profiles import DEFAULT_VIENEU_VOICE_PROFILE
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -208,11 +209,26 @@ def do_regen(bad: list[dict], story_id: str, dry_run: bool) -> int:
     return count
 
 
-def run_audio_worker(reference_audio: str, n_jobs: int) -> None:
+def run_audio_worker(
+    voice: str,
+    voice_profile: str | None,
+    reference_audio: str | None,
+    reference_text: str | None,
+    n_jobs: int,
+) -> None:
     """Run audio worker to process exactly n_jobs chapters (one model load)."""
-    cmd = [sys.executable, "scripts/story_pipeline/audio_worker_viterbox.py",
-           "--max-jobs", str(n_jobs),
-           "--reference-audio", reference_audio]
+    cmd = [
+        sys.executable,
+        "scripts/story_pipeline/audio_worker_vieneu.py",
+        "--max-jobs", str(n_jobs),
+        "--voice", voice,
+    ]
+    if voice_profile:
+        cmd.extend(["--voice-profile", voice_profile])
+    if reference_audio:
+        cmd.extend(["--reference-audio", reference_audio])
+    if reference_text:
+        cmd.extend(["--reference-text", reference_text])
     print(f"\n[WORKER] {' '.join(cmd)}\n")
     result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
@@ -243,8 +259,18 @@ def main() -> None:
     parser.add_argument("--max-regen-rounds", type=int, default=3)
     parser.add_argument("--regen-on", default=",".join(sorted(REGEN_TRIGGERS)),
                         help="Comma-separated issue prefixes that trigger regen")
-    parser.add_argument("--reference-audio", default="wavs/vieneu_alloy1512_1005.wav")
+    parser.add_argument("--voice", default="Xuân Vĩnh")
+    parser.add_argument(
+        "--voice-profile",
+        default=DEFAULT_VIENEU_VOICE_PROFILE,
+        help="BetterBox VieNeu voice-clone profile key. Empty string disables profiles and uses --voice.",
+    )
+    parser.add_argument("--reference-audio", default=None,
+                        help="Optional voice-clone reference WAV. Overrides --voice-profile and --voice.")
+    parser.add_argument("--reference-text", default=None,
+                        help="Optional transcript for --reference-audio.")
     args = parser.parse_args()
+    args.voice_profile = args.voice_profile or None
 
     audio_dir    = Path(args.audio_dir)
     polished_dir = Path(args.polished_dir) if args.polished_dir else None
@@ -291,7 +317,13 @@ def main() -> None:
             print("\nNo chapters could be re-enqueued (DB mismatch). Exiting.\n")
             break
         # Always run worker after regen — even on last round — so WAVs are generated
-        run_audio_worker(args.reference_audio, n_jobs=regenned)
+        run_audio_worker(
+            args.voice,
+            args.voice_profile,
+            args.reference_audio,
+            args.reference_text,
+            n_jobs=regenned,
+        )
         if rnd == args.max_regen_rounds:
             print(f"\nMax regen rounds ({args.max_regen_rounds}) reached.\n")
 

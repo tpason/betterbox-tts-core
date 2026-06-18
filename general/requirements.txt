@@ -7,6 +7,7 @@
 
 torch==2.10.0
 torchaudio==2.10.0
+torchcodec==0.10.0
 
 safetensors>=0.7.0
 huggingface_hub>=1.5.0,<2.0
@@ -22,6 +23,7 @@ conformer==0.3.2
 s3tokenizer
 diffusers>=0.37.0
 resemble-perth==1.0.1
+vieneu==3.0.5
 omegaconf==2.3.0
 pedalboard
 pydub

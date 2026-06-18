@@ -1,6 +1,6 @@
 """Signal-level audio quality analysis for TTS-generated WAV files.
 
-Shared module — imported by audio_worker_viterbox.py (inline retry)
+Shared module — imported by audio_worker_vieneu.py (inline retry)
 and audio_quality_gate.py (batch analysis + regen).
 
 Checks (in order of reliability):
@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-# ── Cadence constants calibrated for Viterbox + Vietnamese ───────────────────
+# ── Cadence constants calibrated for Vietnamese audiobook TTS ────────────────
 SECS_PER_WORD     = 0.32   # generous narrative pace (slow delivery)
 SECS_PER_WORD_MIN = 0.18   # suspiciously fast → likely truncated
 DURATION_MAX_MULT = 2.2    # × expected → EOS miss / repeat artifact

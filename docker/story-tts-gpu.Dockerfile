@@ -13,4 +13,4 @@ RUN apt-get update \
 COPY general/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
-CMD ["python", "scripts/story_pipeline/audio_worker_viterbox.py", "--help"]
+CMD ["python", "scripts/story_pipeline/audio_worker_vieneu.py", "--help"]
