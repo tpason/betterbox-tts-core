@@ -1461,5 +1461,189 @@
       "Transported"
     ],
     "meaning": "bị triệu hồi/dịch chuyển sang thế giới khác — KHÔNG phải hạ cánh/đáp xuống (vật lý)"
+  },
+  {
+    "source_terms": ["마기", "魔气", "Demonic Qi", "Dark Qi", "Evil Qi"],
+    "canonical_vi": "Ma Khí",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Khí Ma", "Năng Lượng Quỷ", "Khí Quỷ", "Năng Lượng Đen"],
+    "meaning": "năng lượng tối tỏa ra từ ma đạo tu sĩ hoặc quái vật ma"
+  },
+  {
+    "source_terms": ["도의", "刀意", "Blade Intent", "Saber Intent", "Sword Will"],
+    "canonical_vi": "Đao Ý",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Ý Đao", "Ý Dao", "Ý Chí Kiếm", "Tâm Chí Đao"],
+    "meaning": "ý niệm/ngộ đạo trong tu luyện đao pháp — cấp cao hơn Đao Khí"
+  },
+  {
+    "source_terms": ["영과", "灵果", "Spirit Fruit", "Spiritual Fruit", "Mystic Fruit"],
+    "canonical_vi": "Linh Quả",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Quả Thần", "Quả Linh", "Trái Cây Linh", "Quả Tu Luyện"],
+    "meaning": "quả linh thiêng có tác dụng tăng tu vi hoặc chữa thương"
+  },
+  {
+    "source_terms": ["영액", "灵液", "Spirit Liquid", "Spiritual Liquid", "Spirit Water"],
+    "canonical_vi": "Linh Dịch",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Chất Lỏng Linh", "Nước Thần", "Dịch Linh"],
+    "meaning": "chất lỏng linh thiêng chiết xuất từ Linh Thảo hoặc vật phẩm thiên nhiên"
+  },
+  {
+    "source_terms": ["비경", "秘境", "Secret Realm", "Hidden Realm", "Mystic Realm", "Secret Territory"],
+    "canonical_vi": "Bí Cảnh",
+    "kind": "place",
+    "priority": true,
+    "wrong_translations": ["Vùng Bí Ẩn", "Khu Vực Bí Mật", "Cõi Bí Ẩn", "Địa Điểm Ẩn"],
+    "meaning": "không gian ẩn có thiên tài địa bảo, thường chỉ mở vào thời điểm nhất định"
+  },
+  {
+    "source_terms": ["동부", "洞府", "Cave Dwelling", "Cultivation Cave", "Spiritual Cave"],
+    "canonical_vi": "Động Phủ",
+    "kind": "place",
+    "priority": true,
+    "wrong_translations": ["Hang Động", "Phòng Hang", "Căn Cứ Động"],
+    "meaning": "nơi cư ngụ và tu luyện riêng của tu sĩ"
+  },
+  {
+    "source_terms": ["노조", "老祖", "Ancestor", "Grand Ancestor", "Founding Ancestor"],
+    "canonical_vi": "Lão Tổ",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Ông Cụ Tổ", "Tổ Tiên", "Ông Già", "Tiền Nhân"],
+    "meaning": "tổ sư khai phái hoặc bậc trưởng lão cao nhất trong môn phái"
+  },
+  {
+    "source_terms": ["소주", "少主", "Young Master", "Young Lord", "Little Master"],
+    "canonical_vi": "Thiếu Chủ",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Chủ Nhỏ", "Cậu Chủ", "Thiếu Gia Nhỏ"],
+    "meaning": "con trai trưởng hoặc người kế thừa của gia tộc/tông môn"
+  },
+  {
+    "source_terms": ["종주", "宗主", "Sect Leader", "Sect Master", "Patriarch"],
+    "canonical_vi": "Tông Chủ",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Chủ Tông Môn", "Lãnh Đạo Tông"],
+    "meaning": "người đứng đầu tông môn"
+  },
+  {
+    "source_terms": ["도심", "道心", "Dao Heart", "Heart of the Dao", "Martial Heart"],
+    "canonical_vi": "Đạo Tâm",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Tâm Đạo", "Lòng Đạo", "Tâm Hồn Đạo"],
+    "meaning": "tâm thái và ý chí kiên định trên con đường tu luyện"
+  },
+  {
+    "source_terms": ["도우", "道友", "Fellow Cultivator", "Dao Friend", "Martial Friend"],
+    "canonical_vi": "Đạo Hữu",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Bạn Đạo", "Hữu Nhân Tu Luyện", "Người Bạn Đạo"],
+    "meaning": "cách xưng hô lịch sự giữa các tu sĩ cùng con đường tu luyện"
+  },
+  {
+    "source_terms": ["입정", "入定", "Enter Meditation", "Deep Meditation", "Cultivation Trance"],
+    "canonical_vi": "Nhập Định",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Vào Trạng Thái Tĩnh", "Thiền Định Sâu", "Vào Thiền"],
+    "meaning": "trạng thái thiền định sâu khi tu luyện — mất ý thức bên ngoài"
+  },
+  {
+    "source_terms": ["감오", "感悟", "Comprehension", "Enlightenment", "Epiphany", "Insight"],
+    "canonical_vi": "Cảm Ngộ",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Cảm Nhận", "Ngộ Nhận", "Hiểu Biết Mới"],
+    "meaning": "khoảnh khắc ngộ ra chân lý trong tu luyện hoặc võ học"
+  },
+  {
+    "source_terms": ["천부", "天赋", "Heavenly Talent", "Natural Talent", "Innate Gift"],
+    "canonical_vi": "Thiên Phú",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Tài Năng Trời Phú", "Thiên Tài Bẩm Sinh"],
+    "meaning": "tài năng bẩm sinh trời ban — khác với Căn Cốt (thể chất tu luyện)"
+  },
+  {
+    "source_terms": ["자질", "资质", "Aptitude", "Cultivation Aptitude", "Talent Grade"],
+    "canonical_vi": "Tư Chất",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Chất Lượng", "Phẩm Chất", "Tố Chất"],
+    "meaning": "tiềm năng tu luyện đánh giá khả năng đạt cảnh giới cao"
+  },
+  {
+    "source_terms": ["위압", "威压", "Imposing Aura", "Oppressive Aura", "Domain Pressure"],
+    "canonical_vi": "Uy Áp",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Áp Lực Uy Thế", "Oai Áp", "Uy Thế Áp Lực", "Sức Ép"],
+    "meaning": "áp lực tinh thần tỏa ra từ tu sĩ mạnh"
+  },
+  {
+    "source_terms": ["살의", "杀意", "Killing Intent", "Murder Intent", "Bloodlust"],
+    "canonical_vi": "Sát Ý",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Ý Định Giết", "Ý Chí Giết Người", "Ý Sát Hại"],
+    "meaning": "sát ý tỏa ra khi quyết tâm giết đối thủ"
+  },
+  {
+    "source_terms": ["신혼", "神魂", "Divine Soul", "Spirit Soul"],
+    "canonical_vi": "Thần Hồn",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Linh Hồn Thần", "Hồn Thần", "Hồn Linh"],
+    "meaning": "linh hồn được tu luyện thành thần thức — cấp cao hơn Thần Thức"
+  },
+  {
+    "source_terms": ["법력", "法力", "Dharma Power", "Magical Power", "Spell Power"],
+    "canonical_vi": "Pháp Lực",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Sức Mạnh Pháp", "Năng Lượng Pháp Thuật", "Lực Pháp"],
+    "meaning": "năng lượng tu luyện dùng trong pháp thuật"
+  },
+  {
+    "source_terms": ["선배", "前辈", "Senior", "Senior Cultivator", "Predecessor"],
+    "canonical_vi": "Tiền Bối",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Tiến Bối", "Người Đi Trước", "Bậc Trên"],
+    "meaning": "cách gọi tôn kính với tu sĩ đi trước hoặc cấp cao hơn"
+  },
+  {
+    "source_terms": ["대능", "大能", "Great Expert", "Powerful Cultivator", "Supreme Expert"],
+    "canonical_vi": "Đại Năng",
+    "kind": "title",
+    "priority": true,
+    "wrong_translations": ["Đại Cường Giả", "Cường Giả Đại", "Bậc Đại Năng Lực"],
+    "meaning": "tu sĩ có thực lực cực mạnh ở cảnh giới rất cao"
+  },
+  {
+    "source_terms": ["영수", "灵兽", "Spirit Beast", "Spiritual Beast"],
+    "canonical_vi": "Linh Thú",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Thú Linh", "Thú Tinh Thần", "Dã Thú Linh"],
+    "meaning": "dã thú có linh tính — thường có thể thuần hóa, khác Ma Thú"
+  },
+  {
+    "source_terms": ["비술", "秘术", "Secret Technique", "Secret Art", "Forbidden Technique"],
+    "canonical_vi": "Bí Thuật",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Kỹ Thuật Bí Mật", "Phương Pháp Bí Ẩn", "Thuật Ẩn"],
+    "meaning": "bí thuật ẩn truyền, thường tiêu hao nhiều để đổi lấy sức mạnh đột biến"
   }
 ]

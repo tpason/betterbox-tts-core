@@ -853,7 +853,7 @@ def _relevant_seed_glossary(
     seed_items: list[dict[str, Any]],
     story_glossary: list[dict[str, Any]],
     text: str,
-    max_items: int = 10,
+    max_items: int = 15,
 ) -> list[dict[str, Any]]:
     """Filter seed items relevant to text, excluding those already in story glossary."""
     story_surfaces = {
@@ -887,28 +887,57 @@ def build_story_memory_prompt(
     text: str,
     *,
     genre: str = "",
-    max_chars: int = 5200,
+    max_chars: int = 6000,
     current_chapter: int = 0,
 ) -> str:
     """Build compact story-specific prompt context for the current chunk.
 
     current_chapter > 0 bật block recap các chương liền trước (continuity).
     current_chapter == 0 (caller không truyền) → bỏ recaps, không đoán.
+
+    Thứ tự ưu tiên: actionable-first (normalization, glossary, chars) → least-critical-last
+    (recaps, style_guide, story_bible). Khi _truncate() cắt cuối prompt, thông tin ít quan
+    trọng nhất bị mất trước.
     """
     sections: list[str] = []
 
-    if memory.story_bible:
-        sections.append("STORY BIBLE:\n" + _truncate(memory.story_bible, 1200))
-    if memory.style_guide:
-        sections.append("STYLE GUIDE:\n" + _truncate(memory.style_guide, 1200))
-
-    recap_block = build_recap_context(memory, current_chapter)
-    if recap_block:
+    # --- Block 1: NORMALIZATION (cao nhất — corrections cụ thể cho chunk này) ---
+    if memory.replacements:
+        text_key = _normalize_key(text)
+        # Chỉ inject các replacements xuất hiện trong text hiện tại (tránh bloat prompt).
+        # Fallback: nếu không có match nào, giữ tối đa 15 entry đầu làm context chung.
+        relevant_repl = [
+            (w, c) for w, c in memory.replacements.items()
+            if _normalize_key(w) in text_key or _normalize_key(c) in text_key
+        ]
+        if not relevant_repl:
+            relevant_repl = list(memory.replacements.items())[:15]
+        relevant_repl = relevant_repl[:40]
         sections.append(
-            "TÓM TẮT CÁC CHƯƠNG TRƯỚC (chỉ là bối cảnh để giữ mạch truyện và xưng hô — "
-            "KHÔNG dịch lại; nếu mâu thuẫn thì char map/glossary thắng):\n" + recap_block
+            "NORMALIZATION BẮT BUỘC:\n"
+            + "\n".join(f"- {wrong} -> {correct}" for wrong, correct in relevant_repl)
         )
 
+    # --- Block 2: Glossary thuật ngữ truyện + thuật ngữ thể loại ---
+    glossary = _relevant_glossary(memory, text)
+    if glossary:
+        sections.append("GLOSSARY / DANH HIỆU / THUẬT NGỮ LIÊN QUAN:\n" + "\n".join(_format_glossary_item(item) for item in glossary))
+
+    seed_items = load_seed_glossary(genre)
+    if seed_items:
+        seed_relevant = _relevant_seed_glossary(seed_items, memory.glossary, text)
+        if seed_relevant:
+            sections.append(
+                "THUẬT NGỮ THỂ LOẠI (ưu tiên thấp hơn glossary truyện nếu mâu thuẫn):\n"
+                + "\n".join(_format_seed_item(item) for item in seed_relevant)
+            )
+
+    # --- Block 3: Nhân vật liên quan ---
+    chars = _relevant_characters(memory, text)
+    if chars:
+        sections.append("NHÂN VẬT LIÊN QUAN TRONG ĐOẠN NÀY:\n" + "\n".join(_format_character(char) for char in chars))
+
+    # --- Block 4: Role / xưng hô ---
     role_lines = DEFAULT_ROLE_POLICIES.get("default", [])
     if genre:
         role_lines = [*role_lines, *DEFAULT_ROLE_POLICIES.get(genre, [])]
@@ -923,29 +952,19 @@ def build_story_memory_prompt(
         )
         sections.append("ROLE BIBLE RIÊNG CỦA TRUYỆN:\n" + role_text)
 
-    chars = _relevant_characters(memory, text)
-    if chars:
-        sections.append("NHÂN VẬT LIÊN QUAN TRONG ĐOẠN NÀY:\n" + "\n".join(_format_character(char) for char in chars))
-
-    seed_items = load_seed_glossary(genre)
-    if seed_items:
-        seed_relevant = _relevant_seed_glossary(seed_items, memory.glossary, text)
-        if seed_relevant:
-            sections.append(
-                "THUẬT NGỮ THỂ LOẠI (ưu tiên thấp hơn glossary truyện nếu mâu thuẫn):\n"
-                + "\n".join(_format_seed_item(item) for item in seed_relevant)
-            )
-
-    glossary = _relevant_glossary(memory, text)
-    if glossary:
-        sections.append("GLOSSARY / DANH HIỆU / THUẬT NGỮ LIÊN QUAN:\n" + "\n".join(_format_glossary_item(item) for item in glossary))
-
-    if memory.replacements:
-        replacements = list(memory.replacements.items())[:40]
+    # --- Block 5: Continuity (ít critical hơn, cắt trước nếu cần) ---
+    recap_block = build_recap_context(memory, current_chapter)
+    if recap_block:
         sections.append(
-            "NORMALIZATION BẮT BUỘC:\n"
-            + "\n".join(f"- {wrong} -> {correct}" for wrong, correct in replacements)
+            "TÓM TẮT CÁC CHƯƠNG TRƯỚC (chỉ là bối cảnh để giữ mạch truyện và xưng hô — "
+            "KHÔNG dịch lại; nếu mâu thuẫn thì char map/glossary thắng):\n" + recap_block
         )
+
+    # --- Block 6: Style guide + story bible (least critical — bị cắt đầu tiên) ---
+    if memory.style_guide:
+        sections.append("STYLE GUIDE:\n" + _truncate(memory.style_guide, 600))
+    if memory.story_bible:
+        sections.append("STORY BIBLE:\n" + _truncate(memory.story_bible, 600))
 
     prompt = "\n\n".join(section for section in sections if section.strip())
     return _truncate(prompt, max_chars)
