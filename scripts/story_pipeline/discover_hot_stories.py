@@ -21,6 +21,8 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from datetime import timedelta  # noqa: E402 — used by UrlSkipCache
+
 from scripts.story_pipeline.crawl_qidian_rankings import (  # noqa: E402
     DEFAULT_RANK_URLS as QIDIAN_RANK_URLS,
     parse_rank_page,
@@ -251,6 +253,105 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 BetterBox-TTS story discovery",
     "Accept-Language": "vi,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
 }
+
+
+_URL_TYPE_CONFIG: dict[str, dict[str, int]] = {
+    "author":   {"base_days": 7,  "cap_days": 30},
+    "category": {"base_days": 1,  "cap_days": 7},
+    "ranking":  {"base_days": 1,  "cap_days": 7},
+    "default":  {"base_days": 1,  "cap_days": 14},
+}
+
+
+def _infer_url_type(url: str) -> str:
+    path = urlparse(url).path
+    if "/tac-gia/" in path or "/author/" in path:
+        return "author"
+    if "ranking" in path or "best-rated" in path or "top100" in path:
+        return "ranking"
+    if "/the-loai/" in path or "/danh-sach/" in path or "/genre/" in path:
+        return "category"
+    return "default"
+
+
+class UrlSkipCache:
+    """File-backed per-URL exponential backoff cache for discovery runs.
+
+    Single-writer assumption: only one discovery process should write to the
+    same file at a time. Safe for the default single-replica Docker setup.
+
+    Schema version is stored at top level so future migrations are detectable.
+    """
+
+    _SCHEMA_VERSION = 1
+
+    def __init__(self, path: Path, *, enabled: bool = True) -> None:
+        self.path = path
+        self.enabled = enabled
+        self._state: dict = {}
+        if enabled:
+            self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            self._state = {"schema_version": self._SCHEMA_VERSION, "updated_at": "", "urls": {}}
+            return
+        try:
+            self._state = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(self._state.get("urls"), dict):
+                raise ValueError("bad schema")
+        except Exception as exc:
+            bak = self.path.with_suffix(".json.bak")
+            print(f"[SKIP-CACHE] corrupt state file ({exc}), moving to {bak}", flush=True)
+            try:
+                self.path.rename(bak)
+            except OSError:
+                pass
+            self._state = {"schema_version": self._SCHEMA_VERSION, "updated_at": "", "urls": {}}
+
+    def _save(self) -> None:
+        self._state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+
+    def should_skip(self, url: str) -> bool:
+        if not self.enabled:
+            return False
+        entry = self._state.get("urls", {}).get(url, {})
+        skip_until = entry.get("skip_until")
+        if not skip_until:
+            return False
+        try:
+            return datetime.fromisoformat(skip_until) > datetime.now(timezone.utc)
+        except ValueError:
+            return False
+
+    def skip_until_str(self, url: str) -> str:
+        return self._state.get("urls", {}).get(url, {}).get("skip_until", "")
+
+    def record_result(self, url: str, new_count: int, url_type: str | None = None) -> None:
+        if not self.enabled:
+            return
+        resolved_type = url_type or _infer_url_type(url)
+        urls = self._state.setdefault("urls", {})
+        entry = urls.setdefault(url, {})
+        entry["url_type"] = resolved_type
+        entry["last_checked_at"] = datetime.now(timezone.utc).isoformat()
+        if new_count > 0:
+            entry["consecutive_empty"] = 0
+            entry.pop("skip_until", None)
+            entry["last_new_at"] = datetime.now(timezone.utc).isoformat()
+        else:
+            cfg = _URL_TYPE_CONFIG.get(resolved_type, _URL_TYPE_CONFIG["default"])
+            n = entry.get("consecutive_empty", 0) + 1
+            entry["consecutive_empty"] = n
+            delay_days = min(cfg["cap_days"], cfg["base_days"] * (2 ** max(n - 1, 0)))
+            entry["skip_until"] = (
+                datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=delay_days)
+            ).isoformat()
+        self._save()
 
 
 @dataclass
@@ -1499,7 +1600,8 @@ def dedupe_candidates(candidates: Iterable[StoryCandidate]) -> list[StoryCandida
     return deduped
 
 
-def upsert_candidates(candidates: Iterable[StoryCandidate]) -> int:
+def upsert_candidates(candidates: Iterable[StoryCandidate]) -> tuple[int, int]:
+    """Upsert candidates to DB. Returns (total_upserted, new_inserts)."""
     from story_db.story_pipeline_db import repository as repo
 
     for code, source in SOURCES.items():
@@ -1507,6 +1609,7 @@ def upsert_candidates(candidates: Iterable[StoryCandidate]) -> int:
 
     candidate_list = list(candidates)
     count = 0
+    new_inserts = 0
     total = len(candidate_list)
     for index, candidate in enumerate(candidate_list, start=1):
         metadata = {
@@ -1538,14 +1641,16 @@ def upsert_candidates(candidates: Iterable[StoryCandidate]) -> int:
             },
         )
         count += 1
+        if story.get("is_new_insert"):
+            new_inserts += 1
         print(
             "[DB] upsert story "
-            f"{index}/{total} id={story.get('id')} "
+            f"{index}/{total} id={story.get('id')} new={story.get('is_new_insert', False)} "
             f"source={candidate.source_code} rank={candidate.rank_name or '-'}#{candidate.rank_position or '-'} "
             f"title={candidate.title} url={candidate.source_url}",
             flush=True,
         )
-    return count
+    return count, new_inserts
 
 
 def main() -> None:
@@ -1665,12 +1770,59 @@ def main() -> None:
     parser.add_argument("--skip-preflight", action="store_true", help="Bỏ qua preflight check, chạy thẳng như cũ.")
     parser.add_argument("--output", default="")
     parser.add_argument("--no-db", action="store_true", help="Chỉ xuất JSON, không upsert DB.")
+    parser.add_argument(
+        "--no-url-skip",
+        action="store_true",
+        help="Bỏ qua URL skip cache, scan tất cả URLs (dùng cho manual run).",
+    )
+    parser.add_argument(
+        "--url-skip-state",
+        default="story_data/discovery/url_skip_state.json",
+        help="Đường dẫn file JSON lưu URL skip state.",
+    )
     args = parser.parse_args()
 
     include_keywords = split_terms(args.include_keywords, DEFAULT_INCLUDE_KEYWORDS)
     exclude_keywords = split_terms(args.exclude_keywords, DEFAULT_EXCLUDE_KEYWORDS)
     if args.no_exclude_filter:
         exclude_keywords = []
+
+    url_skip_cache = UrlSkipCache(
+        Path(args.url_skip_state),
+        enabled=not args.no_url_skip and not args.no_db,
+    )
+
+    def _discover_with_skip(
+        source_code: str,
+        urls: list[str],
+        discover_fn,
+        *fn_args,
+        known_urls: set[str] | None = None,
+        **fn_kwargs,
+    ) -> list[StoryCandidate]:
+        """Run discover_fn per-URL, skip cached URLs, record results in url_skip_cache."""
+        results: list[StoryCandidate] = []
+        for url in urls:
+            if url_skip_cache.should_skip(url):
+                print(
+                    f"[SKIP-CACHE] {source_code} {url} "
+                    f"(backoff until {url_skip_cache.skip_until_str(url)})",
+                    flush=True,
+                )
+                continue
+            url_candidates = discover_fn([url], *fn_args, **fn_kwargs)
+            if known_urls is not None:
+                new_count = sum(
+                    1 for c in url_candidates
+                    if canonical_story_url(c.source_url) not in known_urls
+                )
+                # Update known_urls so subsequent URLs in same run don't double-count
+                known_urls.update(canonical_story_url(c.source_url) for c in url_candidates)
+            else:
+                new_count = len(url_candidates)
+            url_skip_cache.record_result(url, new_count)
+            results.extend(url_candidates)
+        return results
 
     # Preflight: probe mỗi host một lần, thử tìm URL mới nếu path thay đổi
     reachable_hosts: set[str] = set()
@@ -1709,6 +1861,19 @@ def main() -> None:
             print(f"[PREFLIGHT] skipped {skipped}/{len(urls)} URLs (host unreachable)", flush=True)
         return list(dict.fromkeys(result))
 
+    # Pre-load known story source URLs per source for accurate new-story detection in skip cache.
+    # One bulk query per source at start of run — updated in-place by _discover_with_skip.
+    _known_urls_by_source: dict[str, set[str]] = {}
+    if not args.no_db and not args.no_url_skip:
+        try:
+            from story_db.story_pipeline_db import repository as _repo_preload
+            for _sc in args.sources:
+                if _sc == "qidian":  # qidian handled separately (no per-URL skip)
+                    continue
+                _known_urls_by_source[_sc] = _repo_preload.get_story_source_urls_by_source(_sc)
+        except Exception as _exc:
+            print(f"[SKIP-CACHE] could not load known URLs: {_exc}", flush=True)
+
     raw_candidates: list[StoryCandidate] = []
     if "qidian" in args.sources:
         if args.qidian_browser:
@@ -1733,7 +1898,16 @@ def main() -> None:
             )
     if "wattpad_vn" in args.sources:
         raw_candidates.extend(
-            discover_wattpad_vn(live(args.wattpad_urls), args.timeout, args.pages, args.retries, args.retry_sleep)
+            _discover_with_skip(
+                "wattpad_vn",
+                live(args.wattpad_urls),
+                discover_wattpad_vn,
+                args.timeout,
+                args.pages,
+                args.retries,
+                args.retry_sleep,
+                known_urls=_known_urls_by_source.get("wattpad_vn"),
+            )
         )
     if "truyenfull_today" in args.sources:
         tf_list_urls = live(args.truyenfull_today_urls)
@@ -1780,23 +1954,55 @@ def main() -> None:
         all_tf_urls = [*tf_list_urls, *author_urls]
         if all_tf_urls:
             raw_candidates.extend(
-                discover_truyenfull_today(
+                _discover_with_skip(
+                    "truyenfull_today",
                     all_tf_urls,
+                    discover_truyenfull_today,
                     args.timeout,
                     args.pages,
                     args.retries,
                     args.retry_sleep,
+                    known_urls=_known_urls_by_source.get("truyenfull_today"),
                 )
             )
     if "hako" in args.sources:
-        raw_candidates.extend(discover_hako(live(args.hako_urls), args.timeout, args.pages, args.retries, args.retry_sleep))
+        raw_candidates.extend(
+            _discover_with_skip(
+                "hako",
+                live(args.hako_urls),
+                discover_hako,
+                args.timeout,
+                args.pages,
+                args.retries,
+                args.retry_sleep,
+                known_urls=_known_urls_by_source.get("hako"),
+            )
+        )
     if "naver_series" in args.sources:
         raw_candidates.extend(
-            discover_naver_series(live(args.naver_series_urls), args.timeout, args.pages, args.retries, args.retry_sleep)
+            _discover_with_skip(
+                "naver_series",
+                live(args.naver_series_urls),
+                discover_naver_series,
+                args.timeout,
+                args.pages,
+                args.retries,
+                args.retry_sleep,
+                known_urls=_known_urls_by_source.get("naver_series"),
+            )
         )
     if "royalroad" in args.sources:
         raw_candidates.extend(
-            discover_royalroad(live(args.royalroad_urls), args.timeout, args.pages, args.retries, args.retry_sleep)
+            _discover_with_skip(
+                "royalroad",
+                live(args.royalroad_urls),
+                discover_royalroad,
+                args.timeout,
+                args.pages,
+                args.retries,
+                args.retry_sleep,
+                known_urls=_known_urls_by_source.get("royalroad"),
+            )
         )
     if "skydemonorder" in args.sources:
         raw_candidates.extend(
@@ -1859,12 +2065,13 @@ def main() -> None:
     )
 
     db_count = 0
+    db_new = 0
     if not args.no_db:
-        db_count = upsert_candidates(accepted)
+        db_count, db_new = upsert_candidates(accepted)
 
     print(
         f"Discovery xong: raw={len(raw_candidates)} dedupe={len(deduped)} "
-        f"accepted={len(accepted)} db_upsert={db_count} output={output_path}"
+        f"accepted={len(accepted)} db_upsert={db_count} db_new={db_new} output={output_path}"
     )
     for source_code in args.sources:
         print(

@@ -16,6 +16,14 @@ while true; do
     set -- "$@" --sources ${DISCOVERY_SOURCES}
   fi
 
+  if [ "${DISCOVERY_NO_URL_SKIP:-0}" = "1" ]; then
+    set -- "$@" --no-url-skip
+  fi
+
+  if [ -n "${DISCOVERY_URL_SKIP_STATE:-}" ]; then
+    set -- "$@" --url-skip-state "${DISCOVERY_URL_SKIP_STATE}"
+  fi
+
   "$@" || echo "[discovery] run failed; will retry after ${interval}s"
 
   echo "[discovery] sleep ${interval}s"

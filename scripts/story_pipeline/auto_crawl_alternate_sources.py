@@ -8,6 +8,7 @@ import sys
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from types import SimpleNamespace
@@ -1016,6 +1017,58 @@ def inspect_candidate(candidate: dict[str, Any], story: dict[str, Any], alt_args
     }
 
 
+_ALTERNATE_BACKOFF_BASE_HOURS = 6  # aligns with default ALTERNATE_INTERVAL_SECONDS=21600
+_ALTERNATE_BACKOFF_CAP_DAYS = 30
+_ALTERNATE_FAILURE_DECAY_DAYS = 90  # reduce failure count if story was untried for this long
+
+
+def _record_alternate_search_failure(story: dict[str, Any]) -> None:
+    """Write exponential backoff metadata after a failed alternate source search."""
+    meta = story.get("metadata") or {}
+    failures = meta.get("alternate_search_failures") or 0
+    last_tried_str = meta.get("alternate_search_last_tried_at") or ""
+
+    # Decay stale failure counts (not tried for >90 days → reduce)
+    if last_tried_str:
+        try:
+            last_tried = datetime.fromisoformat(last_tried_str)
+            days_since = (datetime.now(timezone.utc) - last_tried).days
+            if days_since >= _ALTERNATE_FAILURE_DECAY_DAYS:
+                failures = max(0, failures - 2)
+        except ValueError:
+            pass
+
+    failures += 1
+    delay_hours = min(
+        _ALTERNATE_BACKOFF_CAP_DAYS * 24,
+        _ALTERNATE_BACKOFF_BASE_HOURS * (2 ** max(failures - 1, 0)),
+    )
+    skip_until = (
+        datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=delay_hours)
+    ).isoformat()
+    now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    repo.update_story_metadata(
+        story["id"],
+        {
+            "alternate_search_failures": failures,
+            "alternate_search_last_tried_at": now_iso,
+            "alternate_skip_until": skip_until,
+        },
+    )
+    log(
+        f"[BACKOFF] story_id={story['id']} failures={failures} "
+        f"skip_until={skip_until} title={story['title']}"
+    )
+
+
+def _clear_alternate_search_backoff(story: dict[str, Any]) -> None:
+    """Remove backoff metadata after a successful alternate source crawl."""
+    repo.delete_story_metadata_keys(
+        story["id"],
+        ["alternate_search_failures", "alternate_search_last_tried_at", "alternate_skip_until"],
+    )
+
+
 def select_target_stories(args: argparse.Namespace) -> list[dict[str, Any]]:
     if args.title:
         return repo.find_stories(
@@ -1024,10 +1077,12 @@ def select_target_stories(args: argparse.Namespace) -> list[dict[str, Any]]:
             limit=args.limit_stories,
         )
 
+    ignore_backoff = getattr(args, "no_story_skip", False)
     stories = repo.list_stories_needing_alternate_source(
         source_codes=args.source or None,
         only_incomplete=not args.include_completed,
         limit=args.limit_stories,
+        ignore_backoff=ignore_backoff,
     )
     if stories:
         log(f"[TARGET] using needs_alternate_source queue: {len(stories)} stories")
@@ -1040,6 +1095,7 @@ def select_target_stories(args: argparse.Namespace) -> list[dict[str, Any]]:
         source_codes=args.source or None,
         only_incomplete=not args.include_completed,
         limit=args.limit_stories,
+        ignore_alternate_backoff=ignore_backoff,
     )
 
 
@@ -1128,6 +1184,11 @@ def main() -> None:
     parser.add_argument("--min-output-ratio", type=float, default=0.70)
     parser.add_argument("--polish-max-chars-per-chunk", type=int, default=5000)
     parser.add_argument("--translate-max-chars-per-chunk", type=int, default=2500)
+    parser.add_argument(
+        "--no-story-skip",
+        action="store_true",
+        help="Ignore alternate_skip_until backoff, force retry tất cả stories.",
+    )
     args = parser.parse_args()
     args.dry_run = not args.apply
 
@@ -1206,6 +1267,8 @@ def main() -> None:
         )
         if not selected:
             log("[SKIP] no confident source with new chapters")
+            if not args.dry_run and not getattr(args, "no_story_skip", False):
+                _record_alternate_search_failure(story)
             continue
         attempted += 1
         if args.dry_run:
@@ -1239,6 +1302,7 @@ def main() -> None:
                 "alternate_source_active_at": result["crawled_at"],
             },
         )
+        _clear_alternate_search_backoff(story)
         crawled += 1
 
     log(f"\n[DONE] selected={attempted} crawled={crawled} dry_run={args.dry_run}")

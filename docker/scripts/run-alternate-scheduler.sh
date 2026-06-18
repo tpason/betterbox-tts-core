@@ -84,6 +84,10 @@ while true; do
     set -- "$@" --max-chapters "${ALTERNATE_MAX_CHAPTERS}"
   fi
 
+  if [ "${ALTERNATE_NO_STORY_SKIP:-0}" = "1" ]; then
+    set -- "$@" --no-story-skip
+  fi
+
   "$@" || echo "[alternate] run failed; will retry after ${interval}s"
 
   echo "[alternate] sleep ${interval}s"
