@@ -15,6 +15,10 @@ Usage examples:
   python scripts/story_pipeline/run_novel_translation.py \
     --story-title "Vĩnh Thoái Hiệp Sĩ" --chapter 543 --skip-polish --skip-final-qa
 
+  # Bounded smoke test: run only the first chunk, never save partial output
+  python scripts/story_pipeline/run_novel_translation.py \
+    --story-title "Vĩnh Thoái Hiệp Sĩ" --chapter 543 --max-chunks 1
+
   # Use a different model
   python scripts/story_pipeline/run_novel_translation.py \
     --story-id <uuid> --chapter 543 --model qwen3:30b
@@ -126,8 +130,13 @@ def main() -> None:
     parser.add_argument("--skip-final-qa", action="store_true")
     parser.add_argument("--genre", default="", help="Override genre detection (e.g. western_fantasy)")
     parser.add_argument("--chunk-size", type=int, default=1800)
+    parser.add_argument("--max-chunks", type=int, default=0,
+                        help="Debug only: process at most N chunks; partial output cannot be saved")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
+
+    if args.save and args.max_chunks > 0:
+        sys.exit("[ERROR] --save is not allowed with --max-chunks partial runs")
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -168,6 +177,8 @@ def main() -> None:
         skip_polish=args.skip_polish,
         skip_final_qa=args.skip_final_qa,
         chunk_size=args.chunk_size,
+        max_chunks=args.max_chunks,
+        source_language=str(story.get("language") or ""),
     )
 
     # Run pipeline
@@ -188,10 +199,17 @@ def main() -> None:
     print(f"PIPELINE RESULT — ch{args.chapter} — {title}")
     print("=" * 60)
     print(f"success:      {result.success}")
+    print(f"partial:      {'YES' if result.is_partial else 'no'}")
     print(f"elapsed:      {result.total_elapsed_s:.1f}s")
     print(f"chunks:       {len(result.chunk_results)}")
     total_violations = sum(len(cr.qa_report.violations) for cr in result.chunk_results)
+    blocking_chunks = sum(1 for cr in result.chunk_results if cr.qa_report.has_blocking_issues)
     print(f"violations:   {total_violations}")
+    print(f"chunk_blocks: {blocking_chunks}")
+    if result.final_quality_blocking:
+        print(f"final_blocking: {', '.join(result.final_quality_blocking)}")
+    if result.final_quality_warnings:
+        print(f"final_warnings: {', '.join(result.final_quality_warnings)}")
     if result.error:
         print(f"error:        {result.error}")
     if result.final_qa:

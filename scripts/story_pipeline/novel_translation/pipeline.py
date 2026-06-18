@@ -79,6 +79,8 @@ class PipelineConfig:
     llm_qa_risks: set[str] = field(default_factory=lambda: set(_DEFAULT_LLM_QA_RISKS))
     skip_final_qa: bool = False
     skip_polish: bool = False
+    max_chunks: int = 0
+    source_language: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -103,12 +105,21 @@ class PipelineResult:
     polished_text: str
     chunk_results: list[ChunkResult] = field(default_factory=list)
     final_qa: FinalQAReport | None = None
+    final_quality_blocking: list[str] = field(default_factory=list)
+    final_quality_warnings: list[str] = field(default_factory=list)
     total_elapsed_s: float = 0.0
     error: str = ""
+    is_partial: bool = False
 
     @property
     def success(self) -> bool:
         if self.error:
+            return False
+        if self.is_partial:
+            return False
+        if self.final_quality_blocking:
+            return False
+        if any(cr.qa_report.has_blocking_issues for cr in self.chunk_results):
             return False
         if self.final_qa and self.final_qa.verdict == "fail":
             return False
@@ -116,6 +127,10 @@ class PipelineResult:
 
     @property
     def needs_review(self) -> bool:
+        if self.final_quality_blocking:
+            return True
+        if any(cr.qa_report.has_blocking_issues for cr in self.chunk_results):
+            return True
         if self.final_qa and self.final_qa.has_major:
             return True
         return any(cr.qa_report.needs_human_review for cr in self.chunk_results)
@@ -299,12 +314,21 @@ def translate_chapter(
         slug, chapter_number, len(chunks),
         {c.risk for c in chunks},
     )
+    chunks_to_process = chunks
+    is_partial = False
+    if cfg.max_chunks > 0 and cfg.max_chunks < len(chunks):
+        chunks_to_process = chunks[:cfg.max_chunks]
+        is_partial = True
+        log.warning(
+            "[PIPELINE] partial run: processing first %d/%d chunks",
+            len(chunks_to_process), len(chunks),
+        )
 
     # Process each chunk
     chunk_results: list[ChunkResult] = []
     pipeline_error = ""
     try:
-        for chunk in chunks:
+        for chunk in chunks_to_process:
             cr = _process_chunk(chunk, ctx, cfg, chapter_number)
             chunk_results.append(cr)
 
@@ -327,6 +351,7 @@ def translate_chapter(
                     chunk_results=chunk_results,
                     total_elapsed_s=time.monotonic() - t_start,
                     error=pipeline_error,
+                    is_partial=is_partial,
                 )
 
             log.info(
@@ -342,6 +367,7 @@ def translate_chapter(
             chunk_results=chunk_results,
             total_elapsed_s=time.monotonic() - t_start,
             error=str(exc),
+            is_partial=is_partial,
         )
 
     # Assemble full chapter text
@@ -350,9 +376,32 @@ def translate_chapter(
         all_lines.extend(cr.polished_lines)
     polished_text = reconstruct_text(all_lines)
 
+    final_quality_blocking: list[str] = []
+    final_quality_warnings: list[str] = []
+    if polished_text:
+        from scripts.story_pipeline.check_translation_quality import run_full_quality_check
+
+        source_for_quality = "\n\n".join(chunk.source_text for chunk in chunks_to_process)
+        final_quality_blocking, final_quality_warnings = run_full_quality_check(
+            polished_text,
+            genre=ctx.genre,
+            story_id=story_id,
+            slug=slug,
+            story_memory_dir=str(memory_dir or ""),
+            source_text=source_for_quality,
+            source_language=cfg.source_language,
+            log=log.warning,
+        )
+        if final_quality_blocking:
+            log.error("[FINAL_QUALITY] blocking=%s", final_quality_blocking)
+        if final_quality_warnings:
+            log.warning("[FINAL_QUALITY] warnings=%s", final_quality_warnings)
+
     # Step 7: Final holistic QA
     final_qa: FinalQAReport | None = None
-    if not cfg.skip_final_qa and polished_text:
+    if is_partial:
+        log.warning("[FINAL_QA] skipped for partial run")
+    elif not cfg.skip_final_qa and polished_text:
         log.info("[FINAL_QA] ch=%d running holistic review…", chapter_number)
         final_qa = run_final_qa(
             chapter_text=polished_text,
@@ -378,5 +427,8 @@ def translate_chapter(
         polished_text=polished_text,
         chunk_results=chunk_results,
         final_qa=final_qa,
+        final_quality_blocking=final_quality_blocking,
+        final_quality_warnings=final_quality_warnings,
         total_elapsed_s=total,
+        is_partial=is_partial,
     )
