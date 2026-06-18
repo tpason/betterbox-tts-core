@@ -777,6 +777,7 @@ def call_ollama(
         "options": {
             "temperature": temperature,
             "num_ctx": num_ctx,
+            "repeat_penalty": 1.1,
         },
         "keep_alive": keep_alive,
     }
@@ -1064,7 +1065,9 @@ def main() -> None:
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default="qwen3:14b")
     parser.add_argument("--temperature", type=float, default=0.25)
-    parser.add_argument("--num-ctx", type=int, default=6144)
+    # 8192: polish system prompt (~1650t) + story memory (6000c≈1500t) + char map + chunk (3500c≈875t)
+    # ≈ 4800t input → 6144 chỉ còn ~1300t output room (tight). 8192 cho ~3400t output room.
+    parser.add_argument("--num-ctx", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--keep-alive", default="30m")

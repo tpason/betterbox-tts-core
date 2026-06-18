@@ -171,8 +171,10 @@ _COMPOUND_NOUN_RE = re.compile(
     r"|\b(nội|đông|đồng|trung)\s+y\b",
     re.IGNORECASE | re.UNICODE,
 )
-# Detect large untranslated English blocks (80+ non-Vietnamese chars)
+# Detect large untranslated English blocks (80+ chars for ZH/KO source, 200+ for EN source).
+# EN→VI: proper nouns and skill names legitimately remain in English, so threshold is higher.
 _EN_BLOCK_RE = re.compile(r"[A-Za-z][A-Za-z ,\.'\-]{79,}")
+_EN_BLOCK_RE_LOOSE = re.compile(r"[A-Za-z][A-Za-z ,\.'\-]{199,}")
 
 # Short English gaming/internet slang can slip past the large block detector.
 # These are warning-only until calibrated on real outputs.
@@ -276,9 +278,12 @@ def check_completeness(
         issues.append(f"length_ratio_low:{ratio:.2f}<{floor:.2f}")
 
     # Structural signals: bắt missing-middle-paragraphs khi total length vẫn bình thường.
+    # EN web novel source tự nhiên có 1 câu/đoạn → VI sẽ gộp thành 2-3 câu/đoạn (40-55% ratio).
+    # Chỉ dùng threshold thấp (0.3) cho EN source; threshold bình thường (0.5) cho ZH/KO/VI.
     src_paras = len([p for p in re.split(r"\n\s*\n", source_text) if p.strip()])
     out_paras = len([p for p in re.split(r"\n\s*\n", polished_text) if p.strip()])
-    if src_paras >= 8 and out_paras < src_paras * 0.5:
+    para_threshold = 0.30 if (source_language or "").lower() in {"en", "english"} else 0.50
+    if src_paras >= 8 and out_paras < src_paras * para_threshold:
         issues.append(f"structure_drift:paragraphs:{out_paras}/{src_paras}")
 
     src_dlg = _count_dialogue_lines(source_text)
@@ -367,8 +372,12 @@ def check_polished_quality(
         if pronoun_count >= 3:
             issues.append(f"wrong_pronoun:{pronoun_count}")
 
-    # Check 6: untranslated English blocks
-    en_blocks = _EN_BLOCK_RE.findall(text)
+    # Check 6: untranslated English blocks.
+    # For EN→VI translation (source_language='en'), only flag very long blocks (200+ chars)
+    # because proper nouns and skill names naturally appear in English in the output.
+    _src_is_en = (source_language or "").strip().lower() in {"en", "english"}
+    en_block_re = _EN_BLOCK_RE_LOOSE if _src_is_en else _EN_BLOCK_RE
+    en_blocks = en_block_re.findall(text)
     if en_blocks:
         issues.append(f"large_en_block:{len(en_blocks)}")
 

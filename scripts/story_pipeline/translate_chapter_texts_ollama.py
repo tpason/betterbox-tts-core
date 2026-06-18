@@ -55,9 +55,11 @@ Nhiệm vụ: dịch truyện tiếng Trung, tiếng Hàn hoặc tiếng Anh san
 
 Quy tắc nội dung:
 - Giữ đầy đủ nội dung, không thêm tình tiết, không lược bỏ.
+- Giữ cấu trúc đoạn văn: mỗi đoạn (ngăn cách bởi dòng trống) trong nguyên bản là một đoạn riêng trong bản dịch. KHÔNG gộp các đoạn lại với nhau. Số đoạn trong bản dịch phải xấp xỉ số đoạn trong nguyên bản.
 - Giữ tên riêng, địa danh, cảnh giới, vật phẩm, công pháp nhất quán.
 - Giữ lời thoại trong dấu ngoặc kép.
 - Dòng hệ thống trong 【 】 dịch ngắn gọn, rõ nghĩa.
+- Thuật ngữ web novel phổ biến: MC (main character) → nhân vật chính; FL (female lead) → nữ chính; ML (male lead) → nam chính — không để nguyên viết tắt tiếng Anh trong bản dịch.
 - Không giải thích, không markdown, không tiêu đề, không ghi chú; chỉ trả về bản tiếng Việt.
 
 Nghĩa và văn phong — ưu tiên rõ nghĩa trước:
@@ -371,19 +373,27 @@ def build_messages(
             "Chúng ghi đè quy tắc chung nếu mâu thuẫn:\n"
             f"{story_memory_context}"
         )
+    # Count source paragraphs and inject count hint when there are multiple paragraphs.
+    # This directly combats structure drift where the model merges short EN paragraphs.
+    src_para_count = len([p for p in text.split("\n\n") if p.strip()])
+    para_hint = (
+        f"[Đoạn này gồm {src_para_count} đoạn văn riêng biệt — bản dịch PHẢI có đúng {src_para_count} đoạn, KHÔNG gộp lại.]\n\n"
+        if src_para_count >= 3 else ""
+    )
+
     if repair_hints:
         preceding_section = (
             f"\nNgữ cảnh đoạn trước (CHỈ tham khảo, không dịch lại):\n---\n{preceding_context}\n---\n"
             if preceding_context else ""
         )
         user_content = TRANSLATE_REPAIR_TEMPLATE.format(
-            repair_hints=repair_hints, preceding_section=preceding_section, text=text
+            repair_hints=repair_hints, preceding_section=preceding_section, text=para_hint + text
         )
     else:
         user_content = (
-            QWEN_USER_WITH_CONTEXT_TEMPLATE.format(preceding_context=preceding_context, text=text)
+            QWEN_USER_WITH_CONTEXT_TEMPLATE.format(preceding_context=preceding_context, text=para_hint + text)
             if preceding_context
-            else QWEN_USER_TEMPLATE.format(text=text)
+            else QWEN_USER_TEMPLATE.format(text=para_hint + text)
         )
     if no_think and "qwen3" in model.lower():
         user_content = "/no_think\n\n" + user_content
@@ -418,6 +428,7 @@ def call_ollama(
         "options": {
             "temperature": temperature,
             "num_ctx": num_ctx,
+            "repeat_penalty": 1.1,
         },
         "keep_alive": keep_alive,
     }
@@ -445,10 +456,15 @@ def call_ollama(
 
 
 def _tail_context(text: str, max_chars: int = 1200) -> str:
-    text = re.sub(r"\s+", " ", (text or "").strip())
+    text = (text or "").strip()
     if len(text) <= max_chars:
         return text
-    return text[-max_chars:].lstrip()
+    tail = text[-max_chars:]
+    # Cắt từ đầu đoạn để tránh bắt đầu giữa câu.
+    newline_pos = tail.find("\n")
+    if newline_pos > 0:
+        tail = tail[newline_pos:].strip()
+    return tail
 
 
 def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace) -> None:
@@ -630,6 +646,8 @@ Priority (highest to lowest): story memory / role bible > character map > genre 
 
 Translation rules (mandatory):
 - Translate COMPLETELY. Never summarize, never omit sentences, paragraphs, dialogue, or system notifications.
+- Preserve paragraph structure: each paragraph (separated by a blank line) in the source must be a separate paragraph in the output. Do NOT merge paragraphs together. The output must have approximately the same number of paragraphs as the source.
+- Web novel abbreviations: MC (main character) → nhân vật chính; FL (female lead) → nữ chính; ML (male lead) → nam chính — do not leave English abbreviations in the Vietnamese output.
 - Output only the Vietnamese text — no notes, no explanations, no markdown, no headings, no editor remarks.
 - If a character map is injected above: STRICTLY follow each character's pronouns, self-address, per-target address, personality, and speech style. These override all general pronoun rules.
 
@@ -860,7 +878,7 @@ def single_pass_translate_polish_file(
                 "model": args.model,
                 "stream": False,
                 "messages": messages,
-                "options": {"temperature": args.temperature, "num_ctx": num_ctx},
+                "options": {"temperature": args.temperature, "num_ctx": num_ctx, "repeat_penalty": 1.1},
                 "keep_alive": getattr(args, "keep_alive", "30m"),
             }
             output = _single_pass_call_with_fallback(
@@ -926,9 +944,10 @@ def main() -> None:
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--model", default="qwen3:14b")
     parser.add_argument("--temperature", type=float, default=0.2)
-    # 4096 vừa đủ cho chunk 2500 ký tự Trung/Hàn + system prompt + output Vietnamese.
-    # Tăng lên 6144-8192 nếu gặp output bị cắt ngắn với ngôn ngữ verbose (Hàn, Anh).
-    parser.add_argument("--num-ctx", type=int, default=4096)
+    # 8192: system prompt (~1000t) + genre addendum + char map + story memory (5200c≈1300t)
+    # + preceding context (1200c≈300t) + chunk (2500c≈700t) = ~3500-4500t input → cần ≥6144.
+    # 4096 trước đây bị overflow khi có char map + story memory → Ollama cắt đầu prompt.
+    parser.add_argument("--num-ctx", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--keep-alive", default="30m")
