@@ -3,6 +3,8 @@
 Backfill script: sửa author/title bị lấy sai do các bugs trong crawl pipeline.
 
 Modes:
+  --fix-display-title  Backfill stories.display_title từ title (strip crawl artifacts).
+                       Chỉ update stories có display_title IS NULL.
   --fix-chapter-urls   Bug 1: xóa 859 stories truyenfull.today có chapter URL làm
                        source_url (title là "Quyển N - Chương M"), upsert lại đúng
                        story URL cha.
@@ -42,6 +44,90 @@ from scripts.story_pipeline.crawl_hako_chapters import (  # noqa: E402
 
 
 CHAPTER_URL_PATTERN = re.compile(r"/(?:quyen-\d+-)?chuong-\d+/?$")
+
+# ── display_title backfill ─────────────────────────────────────────────────────
+# Các artifact crawl phổ biến cần loại khỏi title để tạo display_title sạch.
+_LEADING_ARTIFACT_RE = re.compile(
+    r"^\s*\[Dịch(?:\s+Vip)?\]\s*", re.IGNORECASE
+)
+_TRAILING_ARTIFACT_RES = [
+    # " - Truyện Chữ" / " – Truyện Chữ"
+    re.compile(r"\s*[-–]\s*Truyện\s*Chữ\s*$", re.IGNORECASE),
+    # " - Full" / "(Full)"
+    re.compile(r"\s*[-–]\s*Full\s*$", re.IGNORECASE),
+    re.compile(r"\s*\(Full\)\s*$", re.IGNORECASE),
+    # "(Dịch)" / "(Dịch Vip)" — chỉ dạng có ngoặc, tránh false-positive compound words như "Giao Dịch"
+    re.compile(r"\s*\(Dịch(?:\s+Vip)?\)\s*$", re.IGNORECASE),
+    # "(Cải Biên)" / " Cải Biên"
+    re.compile(r"\s*\(Cải\s*Biên\)\s*$", re.IGNORECASE),
+    re.compile(r"\s+Cải\s*Biên\s*$", re.IGNORECASE),
+    # "(Convert)" / " Convert"
+    re.compile(r"\s*\(Convert\)\s*$", re.IGNORECASE),
+    re.compile(r"\s+Convert\s*$", re.IGNORECASE),
+    # " - Truyện Chữ" duplicate guard
+    re.compile(r"\s*-\s*Truyện\s*Chữ\s*$", re.IGNORECASE),
+]
+
+
+def clean_title_for_display(title: str) -> str:
+    """Strip crawl artifacts from title → clean display_title."""
+    t = title.strip()
+    t = _LEADING_ARTIFACT_RE.sub("", t).strip()
+    changed = True
+    while changed:
+        prev = t
+        for pattern in _TRAILING_ARTIFACT_RES:
+            t = pattern.sub("", t).strip()
+        changed = t != prev
+    return t
+
+
+def fix_display_titles(args: argparse.Namespace) -> None:
+    """Backfill display_title cho stories có display_title IS NULL.
+
+    Chỉ update nếu cleaned title khác với raw title (tức là có artifact để strip).
+    Stories không có artifact thì set display_title = title (canonical clean copy).
+    """
+    dry_run = args.dry_run
+    with db.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, title, language
+            FROM stories
+            WHERE display_title IS NULL
+            ORDER BY total_chapters DESC, title
+            """
+        ).fetchall()
+
+    rows = [dict(r) for r in rows]
+    print(f"[DISPLAY-TITLE] {len(rows)} stories without display_title", flush=True)
+
+    updated = skipped = 0
+    with db.connect() as conn:
+        for row in rows:
+            title = row["title"] or ""
+            cleaned = clean_title_for_display(title)
+            if not cleaned:
+                skipped += 1
+                continue
+
+            label = f"{title!r} → {cleaned!r}" if cleaned != title else f"{title!r} (no change)"
+            if args.verbose or cleaned != title:
+                print(f"  [{'DRY' if dry_run else 'SET'}] {label}", flush=True)
+
+            if not dry_run:
+                conn.execute(
+                    "UPDATE stories SET display_title = %s, updated_at = now() WHERE id = %s",
+                    (cleaned, row["id"]),
+                )
+            updated += 1
+
+        if not dry_run:
+            conn.commit()
+
+    print(f"\n[DISPLAY-TITLE] DONE updated={updated} skipped={skipped}", flush=True)
+    if dry_run:
+        print("[DRY-RUN] Re-run sans --dry-run để apply.", flush=True)
 
 
 def story_url_from_chapter_url(chapter_url: str) -> str:
@@ -261,6 +347,8 @@ def fix_null_authors(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backfill story metadata (author/title).")
+    parser.add_argument("--fix-display-title", action="store_true",
+                        help="Backfill display_title từ title (strip crawl artifacts)")
     parser.add_argument("--fix-chapter-urls", action="store_true",
                         help="Bug 1: xóa/sửa stories truyenfull có chapter URL làm source_url")
     parser.add_argument("--fix-null-authors", action="store_true",
@@ -269,6 +357,7 @@ def main() -> None:
                         help="Lọc theo domain (vd: royalroad, truyenyy). Mặc định: tất cả.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Hiện tác động mà không thực sự thay đổi DB")
+    parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--retry-sleep", type=float, default=2.0)
@@ -276,11 +365,14 @@ def main() -> None:
                         help="Delay giữa các request (giây)")
     args = parser.parse_args()
 
-    if not args.fix_chapter_urls and not args.fix_null_authors:
-        parser.error("Cần chọn ít nhất một mode: --fix-chapter-urls hoặc --fix-null-authors")
+    if not args.fix_display_title and not args.fix_chapter_urls and not args.fix_null_authors:
+        parser.error("Cần chọn ít nhất một mode: --fix-display-title, --fix-chapter-urls hoặc --fix-null-authors")
 
     if args.dry_run:
         print("[DRY RUN] Sẽ không thay đổi DB", flush=True)
+
+    if args.fix_display_title:
+        fix_display_titles(args)
 
     if args.fix_chapter_urls:
         fix_chapter_urls(args)
