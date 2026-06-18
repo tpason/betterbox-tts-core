@@ -248,7 +248,6 @@ services:
               capabilities: [gpu]
 
   polish-worker:
-    profiles: ["ai"]
     build:
       context: .
       dockerfile: docker/story-pipeline.Dockerfile
@@ -256,11 +255,9 @@ services:
     depends_on:
       story-db-migrate:
         condition: service_completed_successfully
-      ollama:
-        condition: service_started
     environment:
       <<: *pipeline-env
-      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       POLISH_WORKERS: ${POLISH_WORKERS:-1}
       POLISH_SOURCE_CODES: ${POLISH_SOURCE_CODES:-}
       POLISH_VI_MODEL: ${POLISH_VI_MODEL:-qwen3:14b}
@@ -282,7 +279,7 @@ services:
       # Kiểm tra DB + Ollama đều reachable.
       test: ["CMD", "sh", "-c",
         "python -c \"import os,psycopg; psycopg.connect(os.environ['STORY_DATABASE_URL']).execute('SELECT 1')\" && \
-         curl -sf ${OLLAMA_URL:-http://ollama:11434}/api/tags > /dev/null"]
+         curl -sf ${OLLAMA_URL:-http://host.docker.internal:11434}/api/tags > /dev/null"]
       interval: 60s
       timeout: 15s
       retries: 3
