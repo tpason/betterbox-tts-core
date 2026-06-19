@@ -476,6 +476,7 @@ def maybe_update_chapter_db(
         raw_text_content=raw_text_content,
         translated_text_content=translated_text_content,
         polished_text_content=polished_text_content,
+        clear_audio=getattr(args, "overwrite", False) or getattr(args, "overwrite_translation", False),
     )
     print(f"[DB] updated chapter={chapter_number} story_id={target_story['id']}", flush=True)
     if args.enqueue_polish:

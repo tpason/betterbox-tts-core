@@ -1,14 +1,17 @@
 # Story Audio Pipeline cho BetterBox TTS
 
-Bộ script này copy và điều chỉnh logic từ project `Dia-Finetuning-Vietnamese` sang BetterBox-TTS:
+Bộ script này vận hành pipeline tạo audiobook từ nguồn truyện public/được phép dùng sang nội dung đọc trong Story Reader và audio.
 
-1. Crawl danh sách chương từ `wattpad.com.vn`.
-2. Tải nội dung từng chương thành `chapterX.txt`.
-3. Crawl metadata truyện hot từ `qidian.com`.
-4. Dịch hoặc polish text bằng Ollama local.
-5. Polish title truyện bằng Ollama local, lưu vào `stories.display_title`.
-6. Sinh audio `chapterX.wav` bằng BetterBox Viterbox.
-7. Merge nhiều chapter wav thành một file dài.
+Luồng production hiện tại:
+
+1. Discover/crawl metadata và chapter từ DB/source adapters.
+2. Lưu raw text vào PostgreSQL (`chapters.raw_text_content`).
+3. Dịch/polish bằng Ollama qua `story_jobs` queue.
+4. Lưu translated/polished/reader-formatted content trong DB.
+5. Sinh audio bằng VieNeu-TTS v3.
+6. Story Reader đọc DB + audio segment metadata.
+
+Các script file-based vẫn còn để debug/legacy, nhưng không phải flow mặc định.
 
 ## 0. Chuẩn bị
 
@@ -20,10 +23,10 @@ source viterbox/venv/bin/activate
 pip install -r general/requirements.txt
 ```
 
-Nếu bạn đã build voice profile `Wise Lady`, nên dùng reference voice:
+Audio mặc định hiện dùng VieNeu-TTS v3 với voice profile:
 
 ```text
-wavs/dolly_wise_lady.wav
+preset_binh_an -> Bình An (VieNeu v3 built-in preset)
 ```
 
 Nếu muốn polish text bằng AI local, cài Ollama và pull model:
@@ -516,18 +519,24 @@ story_data/logs/backfill_story_descriptions_ollama.log
 
 ## 7. Dịch hoặc polish text chapter bằng Ollama
 
-Workflow khuyến nghị cho nguồn tiếng Trung hoặc tiếng Anh:
+Workflow production khuyến nghị là chạy qua DB queue:
 
-```text
-1. translategemma:12b dịch Trung/Anh -> Việt
-2. qwen3:8b hoặc qwen3:14b polish + sửa thuật ngữ tiên hiệp
-3. preview TTS
-4. generate audio
+```bash
+viterbox/venv/bin/python scripts/story_pipeline/polish_worker.py \
+  --once --workers 1 --batch-size 1 \
+  --vi-model qwen3:14b \
+  --translate-model translategemma:12b \
+  --post-translate polish
 ```
 
-### Dịch tiếng Trung sang tiếng Việt
+Behavior hiện tại:
 
-Với TranslateGemma:
+- Không cần truyền `--genre`; genre tự suy từ DB metadata/source/language/char map.
+- Không cần `--no-save-files`; DB-only là mặc định.
+- Raw tiếng Việt được polish trực tiếp.
+- Raw không phải tiếng Việt được translate sang Việt rồi polish.
+
+### Legacy/debug file-based
 
 ```bash
 python scripts/story_pipeline/translate_chapter_texts_ollama.py \
@@ -542,10 +551,10 @@ Sau đó polish bản dịch bằng Qwen:
 python scripts/story_pipeline/polish_chapter_texts_ollama.py \
   --input-dir story_data/translated/<slug-truyen> \
   --chapter 1 \
-  --model qwen3:8b
+  --model qwen3:14b
 ```
 
-Output:
+Output legacy/file-based:
 
 ```text
 story_data/translated/<slug-truyen>/chapter1.txt
@@ -608,54 +617,54 @@ Script polish nội dung sẽ skip file polished đã tồn tại. Muốn polish
 --overwrite
 ```
 
-## 8. Sinh audio từng chương bằng Viterbox
+## 8. Sinh audio từng chương bằng VieNeu-TTS v3
 
-### Preview một đoạn text trước
+Audio production hiện dùng VieNeu-TTS v3. Default voice cho truyện tiên hiệp/system:
 
-Bạn nên test một đoạn ngắn trước khi generate cả chương:
-
-```bash
-python scripts/story_pipeline/preview_text_viterbox.py \
-  --text-file story_data/polished/cau-tha-thanh-thanh-nhan-tien-quan-trieu-ta-cham-ngua/chapter1.txt \
-  --reference-audio wavs/dolly_wise_lady.wav \
-  --output story_audio/preview_wise_lady.wav \
-  --speed 0.9
+```text
+preset_binh_an -> Bình An (VieNeu v3 built-in preset)
 ```
 
-Hoặc pipe trực tiếp từ clipboard/file:
+### Test một audio ngắn
 
 ```bash
-python scripts/story_pipeline/preview_text_viterbox.py \
-  --reference-audio wavs/dolly_wise_lady.wav \
-  --output story_audio/preview_wise_lady.wav < story_data/preview.txt
-```
-
-Script preview sẽ normalize nhẹ các markup truyện như `【...】`, `1%`, `...`, và tách mỗi dòng thành câu để đọc mượt hơn. Nếu muốn nghe bản raw không normalize:
-
-```bash
---no-normalize-markup
-```
-
-Nên chạy thử một chương trước:
-
-```bash
-python scripts/story_pipeline/generate_chapter_audio_viterbox.py \
-  --input-dir story_data/polished/cau-tha-thanh-thanh-nhan-tien-quan-trieu-ta-cham-ngua \
+viterbox/venv/bin/python scripts/story_pipeline/generate_chapter_audio_vieneu.py \
+  --input-dir /tmp/betterbox-vieneu-smoke-input \
+  --output-root /tmp/betterbox-vieneu-smoke-output \
   --chapter 1 \
-  --reference-audio wavs/dolly_wise_lady.wav \
-  --speed 0.9 \
-  --pitch-shift 1.0
+  --overwrite \
+  --voice-profile preset_binh_an \
+  --max-chars-per-unit 120 \
+  --min-chars-per-unit 20 \
+  --max-new-frames 180 \
+  --sentence-pause-ms 250 \
+  --crossfade-ms 0 \
+  --no-watermark
 ```
 
-Sinh toàn bộ chương:
+### Generate thử một chapter
 
 ```bash
-python scripts/story_pipeline/generate_chapter_audio_viterbox.py \
-  --input-dir story_data/polished/cau-tha-thanh-thanh-nhan-tien-quan-trieu-ta-cham-ngua \
+viterbox/venv/bin/python scripts/story_pipeline/generate_chapter_audio_vieneu.py \
+  --input-dir story_data/polished/<slug-truyen> \
+  --output-root story_audio \
+  --chapter 1 \
+  --voice-profile preset_binh_an \
+  --sentence-pause-ms 250 \
+  --crossfade-ms 0 \
+  --overwrite
+```
+
+### Generate toàn bộ folder legacy/file-based
+
+```bash
+viterbox/venv/bin/python scripts/story_pipeline/generate_chapter_audio_vieneu.py \
+  --input-dir story_data/polished/<slug-truyen> \
+  --output-root story_audio \
   --all \
-  --reference-audio wavs/dolly_wise_lady.wav \
-  --speed 0.9 \
-  --pitch-shift 1.0
+  --voice-profile preset_binh_an \
+  --sentence-pause-ms 250 \
+  --crossfade-ms 0
 ```
 
 Output:
@@ -666,14 +675,34 @@ story_audio/<slug-truyen>/chapter2.wav
 ...
 ```
 
-### Tham số nên dùng cho truyện nghe ngủ
+### Tham số nên chỉnh trước
 
 ```bash
---speed 0.85
---pitch-shift 1.0
---max-chars-per-block 900
---block-silence-ms 500
+--voice-profile
+--sentence-pause-ms
+--max-new-frames
+--max-chars-per-unit
+--min-chars-per-unit
 ```
+
+Các script Viterbox (`preview_text_viterbox.py`, `generate_chapter_audio_viterbox.py`) vẫn còn để so sánh/legacy, nhưng không phải default production.
+
+### Khảo sát/chọn voice tự động
+
+Script này chấm điểm VieNeu v3 preset voices và voice clone trong `voice_bank/vieneu` theo tiêu chí audiobook tiên hiệp/system:
+
+```bash
+viterbox/venv/bin/python scripts/story_pipeline/survey_vieneu_voices.py --top 12
+```
+
+Output mặc định:
+
+```text
+/tmp/betterbox-vieneu-voice-survey/vieneu_voice_survey.json
+/tmp/betterbox-vieneu-voice-survey/vieneu_voice_survey.md
+```
+
+Kết quả hiện tại chọn `preset_binh_an` vì đây là built-in speaker token nam điềm đạm, ổn định hơn single-WAV cloning và hợp nghe dài.
 
 Nếu bị đọc sai chữ, thử giảm độ dài block:
 

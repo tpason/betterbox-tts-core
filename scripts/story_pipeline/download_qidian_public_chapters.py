@@ -150,6 +150,7 @@ def emit_polish_job(
             polished_text_path=polished_path.as_posix(),
             translated_text_content=polished_path.read_text(encoding="utf-8"),
             polished_text_content=polished_path.read_text(encoding="utf-8"),
+            clear_audio=overwrite,
         )
         print(f"[SKIP] DB polish job, polished exists: {polished_path}")
         return

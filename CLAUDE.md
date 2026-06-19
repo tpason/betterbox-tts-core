@@ -120,7 +120,9 @@ CRAWLER_REPLICAS=3 docker compose up -d   # 3 replicas crawl song song
 STORY_DATABASE_URL=postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story
 ALTERNATE_APPLY=0          # 1 để thật sự import từ nguồn phụ
 CRAWLER_ONLY_INCOMPLETE=1  # chỉ crawl story chưa complete
-AUDIO_REFERENCE_AUDIO=wavs/vieneu_alloy1512_1005.wav
+AUDIO_VIENEU_VOICE_PROFILE=preset_binh_an
+AUDIO_SEGMENT_VIENEU_VOICE_KEY=preset_binh_an
+AUDIO_SEGMENT_VIENEU_VOICE_PROFILE=preset_binh_an
 ```
 
 ---
@@ -156,14 +158,16 @@ AUDIO_REFERENCE_AUDIO=wavs/vieneu_alloy1512_1005.wav
 | Script | Mô tả |
 |---|---|
 | `translate_chapter_texts_ollama.py` | Dịch file-based |
-| `translate_chapters_from_db.py` | Dịch từ DB |
+| `translate_chapters_from_db.py` | Dịch non-VI raw từ DB; `--post-translate queue` enqueue polish job |
 | `polish_chapter_texts_ollama.py` | Polish file-based |
-| `polish_worker.py` | Worker từ DB queue (cả translate lẫn polish) |
-| `repolish_story_from_db.py` | Re-polish toàn bộ story (dùng khi update char map hoặc prompt) |
+| `polish_worker.py` | Worker từ DB queue; VI polish trực tiếp, non-VI translate rồi polish |
+| `repolish_story_from_db.py` | Re-polish trực tiếp từ DB, không qua queue |
 | `reformat_polished_chapter_content.py` | Repair noise mà không gọi LLM |
 | `polish_story_titles_ollama.py` | Polish tên truyện |
 
 **Prompt profiles:** `--prompt-profile full` (default, chất lượng cao) | `--prompt-profile fast` | `--polish-mode clean` (không LLM).
+
+**Default hiện tại:** DB-only, không ghi txt files cho translate/polish bình thường. Không cần truyền `--no-save-files`; cũng không pin `--genre` trừ khi debug override vì genre tự suy ra từ DB metadata/source/language/char map.
 
 ### Char Map
 | Script | Khi nào dùng |
@@ -179,12 +183,20 @@ AUDIO_REFERENCE_AUDIO=wavs/vieneu_alloy1512_1005.wav
 ### Audio
 | Script | Mô tả |
 |---|---|
-| `preview_text_viterbox.py` | Preview 800 chars trước khi generate toàn bộ |
-| `generate_chapter_audio_viterbox.py` | Generate audio chapter (file-based) |
-| `audio_worker_viterbox.py` | Worker audio từ DB, job type `audio_chapter` |
-| `audio_segment_worker_viterbox.py` | Worker audio theo segments, stitch MP3, job type `audio_chapter_segments` |
+| `generate_chapter_audio_vieneu.py` | Generate VieNeu-TTS v3 audio chapter (file-based/debug) |
+| `audio_worker_vieneu.py` | VieNeu worker audio từ DB, job type `audio_chapter` |
+| `audio_segment_worker_vieneu.py` | VieNeu worker audio theo segments, stitch MP3, job type `audio_chapter_segments` |
+| `vieneu_voice_profiles.py` | Curated reference voices cho audiobook |
+| `vieneu_audiobook_stitch.py` | Text splitting, generation loop, silence/crossfade/stitch |
+| `preview_text_viterbox.py` | Legacy Viterbox preview fallback |
+| `generate_chapter_audio_viterbox.py` | Legacy Viterbox chapter generation |
+| `audio_worker_viterbox.py` | Legacy Viterbox DB worker |
+| `audio_segment_worker_viterbox.py` | Legacy Viterbox segment worker |
 | `merge_chapter_audio.py` | Merge nhiều chapter WAV thành 1 file |
 | `enqueue_audio_jobs_from_db.py` | Enqueue audio jobs thủ công theo story/chapter range |
+
+**Default voice:** `preset_binh_an` -> `Bình An` (VieNeu v3 built-in preset).
+`torchcodec==0.10.0` is pinned for current `torch==2.10.0+cu128` compatibility.
 
 **Lưu ý:** Audio KHÔNG tự enqueue sau polish để tránh đầy disk. Enqueue thủ công khi cần.
 

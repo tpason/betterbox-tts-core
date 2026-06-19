@@ -2,6 +2,33 @@
 
 ### app base trên Vitterbox tts: https://github.com/iamdinhthuan/viterbox-tts
 
+## Trạng thái hiện tại: story audiobook pipeline
+
+Ngoài Gradio TTS app gốc, repo này hiện có pipeline tạo audiobook bán tự động:
+
+```text
+crawl/discover truyện
+  -> PostgreSQL story DB
+  -> translate/polish bằng Ollama
+  -> VieNeu-TTS v3 audio
+  -> story_reader web app
+```
+
+Các điểm quan trọng:
+
+- Text pipeline hiện là DB-first/DB-only: raw, translated, polished và reader-formatted content nằm trong PostgreSQL.
+- Không ghi txt files cho translate/polish trong flow production; các script file-based cũ chỉ dùng để debug/legacy.
+- Audio backend production hiện là VieNeu-TTS v3, không phải Viterbox.
+- Voice mặc định cho truyện tiên hiệp/hệ thống: `preset_binh_an` (`Bình An`, built-in VieNeu v3 preset).
+- Audio không tự enqueue sau polish để tránh đầy disk; chọn story/chapter rồi enqueue thủ công.
+
+Đọc thêm:
+
+- `scripts/story_pipeline/README.md` — hướng dẫn pipeline crawl/translate/polish/audio.
+- `story_db/README.md` — database, schema, discovery/crawl.
+- `docker/env.example` — env vars cho Docker workers.
+- `.agent/PROJECT_CONTEXT.md` — context local cho AI agents, không push lên repo.
+
 ## một số tính năng mới - chung: 
 - 1. bổ sung tùy chọn model Omnivoice hoặc Viterbox ngoài UI. click chọn là chạy.
 - 2. fix bug UI
