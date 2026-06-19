@@ -817,8 +817,10 @@ def claim_story_jobs(
     limit: int = 1,
     *,
     source_codes: Sequence[str] | None = None,
+    story_ids: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     source_codes = [code for code in (source_codes or []) if code]
+    story_ids = [story_id for story_id in (story_ids or []) if story_id]
     with connect() as conn:
         rows = conn.execute(
             """
@@ -830,6 +832,7 @@ def claim_story_jobs(
                   AND run_after <= now()
                   AND attempts < max_attempts
                   AND (%s::text[] IS NULL OR source_code = ANY(%s::text[]))
+                  AND (%s::uuid[] IS NULL OR story_id = ANY(%s::uuid[]))
                 ORDER BY priority, created_at
                 LIMIT %s
                 FOR UPDATE SKIP LOCKED
@@ -844,7 +847,7 @@ def claim_story_jobs(
             WHERE j.id = selected.id
             RETURNING j.*
             """,
-            (job_type, source_codes or None, source_codes or None, limit, worker_id),
+            (job_type, source_codes or None, source_codes or None, story_ids or None, story_ids or None, limit, worker_id),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -920,7 +923,13 @@ def update_chapter_text_outputs(
     raw_text_content: str | None = None,
     translated_text_content: str | None = None,
     polished_text_content: str | None = None,
+    clear_audio: bool = False,
 ) -> dict[str, Any]:
+    """Update text output columns for a chapter.
+
+    clear_audio: khi True và polished_text_content được set, xóa is_audio_generated + audio_path.
+    Dùng khi re-polish (--overwrite) để audio cũ không còn được serve sau khi text thay đổi.
+    """
     with connect() as conn:
         row = conn.execute(
             """
@@ -932,6 +941,14 @@ def update_chapter_text_outputs(
                 polished_text_content = COALESCE(%(polished_text_content)s::text, polished_text_content),
                 is_translated = is_translated OR (%(translated_text_path)s::text IS NOT NULL OR %(translated_text_content)s::text IS NOT NULL),
                 is_polished = is_polished OR (%(polished_text_path)s::text IS NOT NULL OR %(polished_text_content)s::text IS NOT NULL),
+                is_audio_generated = CASE
+                    WHEN %(clear_audio)s THEN FALSE
+                    ELSE is_audio_generated
+                END,
+                audio_path = CASE
+                    WHEN %(clear_audio)s THEN NULL
+                    ELSE audio_path
+                END,
                 translated_at = CASE
                     WHEN %(translated_text_path)s::text IS NOT NULL OR %(translated_text_content)s::text IS NOT NULL THEN now()
                     ELSE translated_at
@@ -958,6 +975,7 @@ def update_chapter_text_outputs(
                 "raw_text_content": raw_text_content,
                 "translated_text_content": translated_text_content,
                 "polished_text_content": polished_text_content,
+                "clear_audio": clear_audio,
             },
         ).fetchone()
         assert row is not None
@@ -1468,7 +1486,27 @@ def list_all_chapter_audio_segments(chapter_id: str, *, voice_key: str = "xianxi
         return [dict(row) for row in rows]
 
 
-def mark_chapter_audio_segment_running(segment_id: str) -> dict[str, Any]:
+def reset_stale_running_chapter_audio_segments(*, stale_after_minutes: int = 120) -> int:
+    """Reset running segments older than stale_after_minutes back to pending.
+    Call at worker startup to recover from crashes that left segments in running state."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            UPDATE chapter_audio_segments
+            SET status = 'pending',
+                updated_at = now()
+            WHERE status = 'running'
+              AND updated_at < now() - make_interval(mins => %s)
+            RETURNING id
+            """,
+            (stale_after_minutes,),
+        ).fetchall()
+        return len(rows)
+
+
+def mark_chapter_audio_segment_running(segment_id: str) -> dict[str, Any] | None:
+    """Mark a segment as running. Returns None if the segment is no longer pending/failed
+    (e.g., already claimed by another process or invalidated by re-enqueue)."""
     with connect() as conn:
         row = conn.execute(
             """
@@ -1477,31 +1515,59 @@ def mark_chapter_audio_segment_running(segment_id: str) -> dict[str, Any]:
                 error = NULL,
                 updated_at = now()
             WHERE id = %s
+              AND status IN ('pending', 'failed')
             RETURNING *
             """,
             (segment_id,),
         ).fetchone()
-        assert row is not None
-        return dict(row)
+        return dict(row) if row is not None else None
 
 
-def complete_chapter_audio_segment(segment_id: str, *, audio_path: str, duration_seconds: float) -> dict[str, Any]:
+def complete_chapter_audio_segment(
+    segment_id: str,
+    *,
+    audio_path: str,
+    duration_seconds: float,
+    claimed_text_hash: str | None = None,
+) -> dict[str, Any] | None:
+    """Mark a segment ready.
+
+    claimed_text_hash: hash của text_content khi worker bắt đầu xử lý segment.
+    Nếu được truyền, UPDATE chỉ thành công khi DB row vẫn còn hash đó — nếu
+    chapter được re-polish trong lúc worker đang chạy, hash sẽ khác và UPDATE
+    trả về 0 rows (returns None). Caller nên log và skip stitch trong trường hợp đó.
+    """
     with connect() as conn:
-        row = conn.execute(
-            """
-            UPDATE chapter_audio_segments
-            SET status = 'ready',
-                audio_path = %s,
-                duration_seconds = %s,
-                error = NULL,
-                updated_at = now()
-            WHERE id = %s
-            RETURNING *
-            """,
-            (audio_path, duration_seconds, segment_id),
-        ).fetchone()
-        assert row is not None
-        return dict(row)
+        if claimed_text_hash is not None:
+            row = conn.execute(
+                """
+                UPDATE chapter_audio_segments
+                SET status = 'ready',
+                    audio_path = %s,
+                    duration_seconds = %s,
+                    error = NULL,
+                    updated_at = now()
+                WHERE id = %s
+                  AND text_hash = %s
+                RETURNING *
+                """,
+                (audio_path, duration_seconds, segment_id, claimed_text_hash),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                UPDATE chapter_audio_segments
+                SET status = 'ready',
+                    audio_path = %s,
+                    duration_seconds = %s,
+                    error = NULL,
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (audio_path, duration_seconds, segment_id),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
 
 def fail_chapter_audio_segment(segment_id: str, error: str) -> dict[str, Any]:
@@ -1519,3 +1585,155 @@ def fail_chapter_audio_segment(segment_id: str, error: str) -> dict[str, Any]:
         ).fetchone()
         assert row is not None
         return dict(row)
+
+
+def enqueue_audio_segments_for_chapter(
+    chapter_id: str,
+    story_id: str,
+    segments: list[str],
+    *,
+    voice_key: str = "xianxia_story_male",
+    source_code: str | None = None,
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """INSERT pre-split TTS segments vào chapter_audio_segments và tạo audio_chapter_segments job.
+
+    Idempotent:
+    - Segment có cùng text_hash → giữ nguyên status/audio (không reset)
+    - Segment có text_hash khác (re-polish) → reset về pending, xóa audio_path/duration/error
+    - Segments có index >= len(segments) (old chapter có nhiều segment hơn) → xóa nếu không running
+    - Job: nếu có segment mới hoặc bị reset → force job về pending (trừ khi đang running)
+      Điều này đảm bảo re-polish sau job done vẫn được worker pick up.
+
+    Returns {"total": int, "inserted": int, "reset": int, "unchanged": int, "job": dict}
+    """
+    import hashlib
+
+    if not segments:
+        raise ValueError("segments list is empty — nothing to enqueue")
+
+    with connect() as conn:
+        # Xóa segments thừa từ lần enqueue cũ (chỉ xóa nếu không đang chạy).
+        # deleted_count > 0 nghĩa là chapter bị rút ngắn → phải re-stitch audio.
+        deleted_result = conn.execute(
+            """
+            DELETE FROM chapter_audio_segments
+            WHERE chapter_id = %s AND voice_key = %s
+              AND segment_index >= %s AND status != 'running'
+            """,
+            (chapter_id, voice_key, len(segments)),
+        )
+        deleted_count = deleted_result.rowcount
+
+        inserted = reset = unchanged = 0
+        for idx, text in enumerate(segments):
+            text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+            # (xmax = 0) → INSERT mới; xmax != 0 → row đã tồn tại (UPDATE)
+            # status 'pending' sau UPDATE → đã bị reset do text_hash thay đổi
+            row = conn.execute(
+                """
+                INSERT INTO chapter_audio_segments
+                    (chapter_id, story_id, segment_index, text_hash, text_content, voice_key, status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                ON CONFLICT (chapter_id, voice_key, segment_index) DO UPDATE SET
+                    text_hash        = EXCLUDED.text_hash,
+                    text_content     = EXCLUDED.text_content,
+                    status           = CASE
+                                         WHEN chapter_audio_segments.text_hash != EXCLUDED.text_hash
+                                           OR chapter_audio_segments.status = 'failed'
+                                         THEN 'pending'
+                                         ELSE chapter_audio_segments.status
+                                       END,
+                    audio_path       = CASE
+                                         WHEN chapter_audio_segments.text_hash != EXCLUDED.text_hash
+                                         THEN NULL
+                                         ELSE chapter_audio_segments.audio_path
+                                       END,
+                    duration_seconds = CASE
+                                         WHEN chapter_audio_segments.text_hash != EXCLUDED.text_hash
+                                         THEN NULL
+                                         ELSE chapter_audio_segments.duration_seconds
+                                       END,
+                    error            = CASE
+                                         WHEN chapter_audio_segments.text_hash != EXCLUDED.text_hash
+                                           OR chapter_audio_segments.status = 'failed'
+                                         THEN NULL
+                                         ELSE chapter_audio_segments.error
+                                       END,
+                    updated_at       = now()
+                RETURNING
+                    (xmax = 0)                            AS was_inserted,
+                    (xmax != 0 AND status = 'pending')    AS was_reset
+                """,
+                (chapter_id, story_id, idx, text_hash, text, voice_key),
+            ).fetchone()
+            assert row is not None
+            if row["was_inserted"]:
+                inserted += 1
+            elif row["was_reset"]:
+                reset += 1
+            else:
+                unchanged += 1
+
+        # Job upsert — trong cùng transaction với segment upserts.
+        # Nếu có segment mới, bị reset, hoặc bị xóa (chapter rút ngắn): force job về pending (trừ running).
+        # deleted_count > 0 cần force-pending để worker re-stitch audio với set segment mới.
+        # Nếu tất cả unchanged và không có deletion: đảm bảo job tồn tại nhưng không downgrade done → pending.
+        has_pending_work = (inserted + reset + deleted_count) > 0
+        payload_json = Jsonb({"voice_key": voice_key, "segment_count": len(segments)})
+        if has_pending_work:
+            job_row = conn.execute(
+                """
+                INSERT INTO story_jobs (
+                    job_type, chapter_id, story_id, source_code, payload, max_attempts
+                )
+                VALUES ('audio_chapter_segments', %s, %s, %s, %s, %s)
+                ON CONFLICT (job_type, chapter_id) DO UPDATE SET
+                    story_id     = COALESCE(EXCLUDED.story_id, story_jobs.story_id),
+                    source_code  = COALESCE(EXCLUDED.source_code, story_jobs.source_code),
+                    payload      = story_jobs.payload || EXCLUDED.payload,
+                    max_attempts = GREATEST(story_jobs.max_attempts, EXCLUDED.max_attempts),
+                    status       = CASE
+                                     WHEN story_jobs.status = 'running' THEN 'running'
+                                     ELSE 'pending'
+                                   END,
+                    run_after    = CASE
+                                     WHEN story_jobs.status = 'running' THEN story_jobs.run_after
+                                     ELSE now()
+                                   END,
+                    attempts     = CASE
+                                     WHEN story_jobs.status = 'running' THEN story_jobs.attempts
+                                     ELSE 0
+                                   END,
+                    updated_at   = now()
+                RETURNING *
+                """,
+                (chapter_id, story_id, source_code, payload_json, max_attempts),
+            ).fetchone()
+        else:
+            # Tất cả segments unchanged — chỉ cần đảm bảo job tồn tại
+            job_row = conn.execute(
+                """
+                INSERT INTO story_jobs (
+                    job_type, chapter_id, story_id, source_code, payload, max_attempts
+                )
+                VALUES ('audio_chapter_segments', %s, %s, %s, %s, %s)
+                ON CONFLICT (job_type, chapter_id) DO UPDATE SET
+                    story_id     = COALESCE(EXCLUDED.story_id, story_jobs.story_id),
+                    source_code  = COALESCE(EXCLUDED.source_code, story_jobs.source_code),
+                    payload      = story_jobs.payload || EXCLUDED.payload,
+                    max_attempts = GREATEST(story_jobs.max_attempts, EXCLUDED.max_attempts),
+                    updated_at   = now()
+                RETURNING *
+                """,
+                (chapter_id, story_id, source_code, payload_json, max_attempts),
+            ).fetchone()
+        assert job_row is not None
+
+    return {
+        "total": len(segments),
+        "inserted": inserted,
+        "reset": reset,
+        "unchanged": unchanged,
+        "job": dict(job_row),
+    }

@@ -2,7 +2,8 @@
 
 Subproject này quản lý dữ liệu truyện/chapter cho pipeline crawl -> translate/polish -> TTS.
 
-PostgreSQL lưu metadata và trạng thái. File text/audio vẫn lưu trên disk để dễ kiểm tra và không làm DB phình quá nhanh.
+PostgreSQL lưu metadata, trạng thái, raw/translated/polished text và reader-formatted content.
+File text trên disk chỉ còn là legacy/debug. Audio vẫn lưu trên disk vì dung lượng lớn.
 
 ## Chạy Postgres
 
@@ -54,20 +55,18 @@ is_downloaded
 is_translated
 is_polished
 is_audio_generated
-raw_text_path
-translated_text_path
-polished_text_path
 raw_text_content
 translated_text_content
 polished_text_content
+reader_formatted_text_content
 audio_path
 ```
 
-Các cột `*_text_path` vẫn là nguồn chính cho pipeline crawl/translate/polish/TTS. Các cột
-`*_text_content` dùng cho app đọc truyện độc lập, để reader có thể đọc từ DB mà không phụ thuộc
-layout file của pipeline.
+Các cột `*_text_content` là nguồn chính cho pipeline crawl/translate/polish và Story Reader.
+Các cột `*_text_path` cũ vẫn có thể tồn tại để audit/backfill dữ liệu legacy, nhưng không nên thêm
+flow production mới phụ thuộc vào txt files.
 
-Backfill text content từ path hiện có:
+Backfill text content từ path legacy hiện có:
 
 ```bash
 ./viterbox/venv/bin/python scripts/story_pipeline/backfill_chapter_text_content.py --dry-run --limit 20
