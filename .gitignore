@@ -126,3 +126,7 @@ out/
 /story_audio_segments_local/
 /voice_survey/
 /vieneu_voice_survey/
+
+# Video background sub-project generated outputs
+/video_background/outputs/
+/video_background/.env

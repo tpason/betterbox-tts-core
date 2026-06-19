@@ -16,6 +16,7 @@ docker compose --profile audio up -d              # + audio-enqueuer
 ## Key env (see `docker/env.example`)
 
 - `STORY_DATABASE_URL=postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story`
+- `NEXT_PUBLIC_SITE_URL` — story-reader OG/metadata (Docker build arg)
 - `AUDIO_VIENEU_VOICE_PROFILE=preset_binh_an`
 - `AUDIO_SEGMENT_VIENEU_VOICE_KEY=preset_binh_an`
 - `CRAWLER_ONLY_INCOMPLETE=1`, `ALTERNATE_APPLY=0`

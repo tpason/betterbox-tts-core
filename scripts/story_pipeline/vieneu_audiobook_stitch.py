@@ -22,7 +22,7 @@ from scripts.story_pipeline.viterbox_audiobook_stitch import (
 from scripts.story_pipeline.vieneu_voice_profiles import resolve_vieneu_voice_profile
 
 
-DEFAULT_VIENEU_VOICE = "Bình An"
+DEFAULT_VIENEU_VOICE = "Trọng Hữu"
 DEFAULT_MAX_NEW_FRAMES = 300
 
 

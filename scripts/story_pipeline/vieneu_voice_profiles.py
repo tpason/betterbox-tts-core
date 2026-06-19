@@ -6,7 +6,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-DEFAULT_VIENEU_VOICE_PROFILE = "preset_binh_an"
+DEFAULT_VIENEU_VOICE_PROFILE = "preset_trong_huu"
 
 
 @dataclass(frozen=True)
@@ -406,7 +406,7 @@ VIENEU_VOICE_PROFILES: dict[str, VieneuVoiceProfile] = {
         source="VieNeu-TTS-v3-Turbo built-in",
         license="VieNeu",
         tags=("xianxia", "male", "calm", "narrator", "preset"),
-        notes="Built-in preset — điềm đạm, narrator lý tưởng cho xianxia long-form. Best default candidate.",
+        notes="Built-in preset — điềm đạm; dự phòng nếu Trọng Hữu quá trầm.",
     ),
     "preset_trong_huu": VieneuVoiceProfile(
         key="preset_trong_huu",
@@ -419,7 +419,7 @@ VIENEU_VOICE_PROFILES: dict[str, VieneuVoiceProfile] = {
         source="VieNeu-TTS-v3-Turbo built-in",
         license="VieNeu",
         tags=("xianxia", "male", "scholarly", "narrator", "preset"),
-        notes="Built-in preset — uyên bác, hợp cảnh tu luyện/học thuật/cultivation.",
+        notes="Built-in preset — uyên bác, hợp tiên hiệp/tu luyện long-form. BetterBox default narrator.",
     ),
     "preset_thai_son": VieneuVoiceProfile(
         key="preset_thai_son",
