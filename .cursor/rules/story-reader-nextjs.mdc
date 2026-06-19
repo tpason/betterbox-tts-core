@@ -1,0 +1,39 @@
+---
+description: Story Reader Next.js constraints and conventions
+globs: story_reader/**
+alwaysApply: false
+---
+
+# Story Reader (Next.js)
+
+Read `story_reader/CLAUDE.md` before UI changes.
+
+## CRITICAL — do not run heavy commands
+
+Machine has limited RAM/GPU. **Never run** in agent:
+
+- `npx tsc --noEmit`, `npm run build`, `next build`, `npm run dev`
+- Headless browser / Playwright / Puppeteer
+
+Verify by reading files and grepping. Ask user to run tsc/build if needed.
+
+## Stack
+
+Next.js 15 App Router, React 19, Redux Toolkit, React Query, Three.js (dynamic import only).
+
+## Styling
+
+- Global: `app/globals.css` (append-only cascade)
+- Reader: `app/stories/[storyId]/chapters/[chapterNumber]/reader.css`
+- Do not introduce a conflicting design system — follow `DESIGN.md`
+
+## Xianxia vocabulary
+
+database → Thiên Thư, library → Linh Quyển Đại Thư, profile → Động phủ
+
+## Nested repo
+
+```bash
+git -C story_reader status
+git -C story_reader diff
+```

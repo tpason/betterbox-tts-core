@@ -1,0 +1,27 @@
+---
+description: Docker Compose profiles and service env defaults
+globs: docker-compose.yml,docker/**,docker-compose*.yml
+alwaysApply: false
+---
+
+# Docker Services
+
+```bash
+docker compose up -d                              # base: DB migrate, reader, crawlers
+docker compose --profile ai up -d                 # + Ollama, polish-worker
+docker compose --profile gpu up -d                # + audio workers
+docker compose --profile audio up -d              # + audio-enqueuer
+```
+
+## Key env (see `docker/env.example`)
+
+- `STORY_DATABASE_URL=postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story`
+- `AUDIO_VIENEU_VOICE_PROFILE=preset_binh_an`
+- `AUDIO_SEGMENT_VIENEU_VOICE_KEY=preset_binh_an`
+- `CRAWLER_ONLY_INCOMPLETE=1`, `ALTERNATE_APPLY=0`
+
+## Notes
+
+- GPU audio/polish often run locally, not in Docker containers
+- Disabled sources in default Docker: `hako`, `manhwatv`, `qidian`, `naver_series`
+- Scale crawlers: `CRAWLER_REPLICAS=3 docker compose up -d`

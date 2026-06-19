@@ -89,15 +89,28 @@ out/
 /.claude/
 /.codex/
 
-# Local agent workflow scripts (private, not pipeline code)
+# ai-devkit skill symlinks (absolute paths → ~/.ai-devkit; recreated by install script)
+/.cursor/skills/agent-communication
+/.cursor/skills/agent-orchestration
+/.cursor/skills/dev-lifecycle
+/.cursor/skills/dev-review
+/.cursor/skills/memory
+/.cursor/skills/verify
+/.cursor/skills/tdd
+/.cursor/skills/structured-debug
+/.cursor/skills/security-review
+/.cursor/skills/simplify-implementation
+
+# Local agent workflow scripts
 /start-agents.sh
-/scripts/request_codex_review.sh
 
 # Firecrawl scraped data cache
 /.firecrawl/
 
 # Downloaded documentation dumps / one-off references
 /llms-full.txt
+/local_ai_video_background_project_brief.md
+/novel_translation_agent_review.md
 
 # Internal agent/design/runbook notes. Keep README.md public.
 /AGENTS.md
@@ -107,3 +120,9 @@ out/
 /*RUNBOOK.md
 /*CONTEXT.md
 /*CHECKLIST.md
+
+# Generated merged audio / local voice survey output
+/story_audio_merged/
+/story_audio_segments_local/
+/voice_survey/
+/vieneu_voice_survey/

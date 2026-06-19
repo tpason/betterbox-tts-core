@@ -1,0 +1,39 @@
+---
+description: Story pipeline Python conventions — DB queue, translate/polish, audio workers
+globs: scripts/story_pipeline/**,story_db/**,tests/story_pipeline/**
+alwaysApply: false
+---
+
+# Story Pipeline Python
+
+## Job queue (`story_jobs`)
+
+Types: `polish_chapter`, `translate_chapter`, `audio_chapter`, `audio_chapter_segments`.
+
+Workers: `polish_worker.py`, `audio_worker_vieneu.py`, `audio_segment_worker_vieneu.py`.
+
+## Translate / polish
+
+- VI raw → polish directly; non-VI → translate then polish via queue
+- Default model: `qwen3:14b` for translate + polish
+- Targeted re-polish: `repolish_story_from_db.py` (bypasses queue)
+- Char map stale refresh: workers trigger `extract_char_map.py` every ~150 chapters
+
+## Audio (VieNeu v3)
+
+Key files: `vieneu_voice_profiles.py`, `vieneu_audiobook_stitch.py`, `audio_segment_worker_vieneu.py`.
+
+- Profiles: `preset_binh_an` (default), xianxia WAV clones for A/B
+- `torchcodec==0.10.0` pinned for `torch==2.10.0+cu128`
+- Polish/translate + audio often run on **local terminal with GPU**, not Docker
+
+## Repository layer
+
+`story_db/story_pipeline_db/repository.py` — all DB reads/writes. Check idempotency for enqueue paths.
+
+## Verification
+
+```bash
+viterbox/venv/bin/python -m pytest tests/story_pipeline/ -o cache_dir=/tmp/pytest-cache-betterbox
+viterbox/venv/bin/python -m py_compile scripts/story_pipeline/<changed>.py
+```

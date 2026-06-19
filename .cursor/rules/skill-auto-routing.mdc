@@ -1,0 +1,61 @@
+---
+description: Auto-route tasks to the right agent skill — read SKILL.md when matched, do not wait for user to name skills
+alwaysApply: true
+---
+
+# Skill Auto-Routing
+
+Skills live in `.agents/skills/` and `.cursor/skills/`. **Do not wait for the user to name a skill.** Match the task to a skill, read its `SKILL.md`, then follow it.
+
+## How Cursor loads skills (not manual)
+
+1. **Rules** (this file, `ponytail.mdc`, etc.) — always in context
+2. **Skill descriptions** — indexed; agent picks by task match
+3. **Full skill body** — read on demand when matched (do not preload all 47)
+
+Skip skills with `disable-model-invocation: true` unless user explicitly invokes them.
+
+## BetterBox (project)
+
+| Task signal | Skill |
+|---|---|
+| crawl, polish, translate, TTS, enqueue, worker, pipeline | `betterbox-pipeline-ops` |
+| multi-file feature, PLAN, Codex handoff | `betterbox-implementation` → then **run** `request_codex_review.sh` |
+| review, CODEX_REVIEW, before merge | `betterbox-code-review` (fallback if Codex down) |
+| Codex/Claude handoff, ai-devkit | `multi-agent-handoff`, `agent-communication`, `agent-orchestration` |
+
+## Engineering lifecycle ([addyosmani/agent-skills](https://github.com/addyosmani/agent-skills))
+
+| Phase | Skill |
+|---|---|
+| Underspecified ask | `interview-me` |
+| Rough idea | `idea-refine` |
+| New feature / spec first | `spec-driven-development` |
+| Break spec into tasks | `planning-and-task-breakdown` |
+| Multi-file implement | `incremental-implementation` |
+| Write/fix logic | `test-driven-development` |
+| UI / React / CSS | `frontend-ui-engineering` |
+| API / DB boundary | `api-and-interface-design` |
+| Tests fail / debug | `debugging-and-error-recovery` |
+| Pre-merge review | `code-review-and-quality` |
+| Simplify working code | `code-simplification` |
+| Security | `security-and-hardening` |
+| Unsure which skill | `using-agent-skills` |
+
+## UI taste ([taste-skill](https://github.com/Leonxlnx/taste-skill))
+
+| Task signal | Skill |
+|---|---|
+| New landing / portfolio / marketing UI | `design-taste-frontend` |
+| Redesign existing UI | `redesign-existing-projects` |
+| story_reader pages | `design-taste-frontend` + rule `story-reader-nextjs` |
+| Image → implement | `image-to-code` |
+
+## Ponytail ([ponytail](https://github.com/DietrichGebert/ponytail))
+
+Always-on via `ponytail.mdc`. On demand: `ponytail-review` (diff audit), `ponytail-audit` (repo audit).
+
+## Conflicts
+
+- **ponytail** (minimal) vs **taste-skill** (rich UI) — taste wins for story_reader UI; ponytail wins for Python pipeline
+- **betterbox-code-review** vs **code-review-and-quality** — use betterbox for this repo's DB/queue focus; addy's for general review

@@ -1,0 +1,43 @@
+---
+description: BetterBox-TTS project orientation — repos, venv, DB, core flow
+alwaysApply: true
+---
+
+# BetterBox Orientation
+
+Pipeline: **crawl → translate/polish (DB queue) → VieNeu-TTS v3 audio → story reader**.
+
+## Repos
+
+- Root: Python pipeline, Docker, `story_db/`
+- Nested: `story_reader/` (Next.js) — separate git repo
+
+## Commands & paths
+
+```bash
+viterbox/venv/bin/python scripts/story_pipeline/<script>.py
+# DB: postgresql://betterbox:betterbox@127.0.0.1:54329/betterbox_story
+cd story_db && docker compose up -d
+python story_db/apply_migrations.py
+python -m story_db.story_pipeline_db.cli <command>
+```
+
+## DB-only text (production default)
+
+- Source of truth: `chapters.*_text_content` columns
+- Char map: `stories.metadata.char_map_content` (not legacy txt files)
+- Do not add new txt output for normal translate/polish
+- Do not pass `--genre` unless debugging — genre is inferred from DB
+
+## Audio defaults
+
+- Engine: VieNeu-TTS v3 (Viterbox = legacy)
+- Default voice: `preset_binh_an` → `Bình An`
+- Audio is **not** auto-enqueued after polish — enqueue manually
+
+## Deep reference
+
+- Full overview: `CLAUDE.md`
+- Codex review rules: `AGENTS.md`
+- Runbook: `STORY_PIPELINE_RUNBOOK.md`
+- Current state: `.agent/PROJECT_CONTEXT.md`

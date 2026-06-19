@@ -1,0 +1,33 @@
+---
+description: Multi-agent coordination with Claude Code, Codex, and .agent/ handoff files
+alwaysApply: true
+---
+
+# Agent Coordination
+
+This repo uses local handoff files in `.agent/` (gitignored). Git commits are the public source of truth.
+
+## Role split
+
+- **Claude Code**: plan + implement by default
+- **Codex**: review by default; implement only when user explicitly asks
+- **Cursor**: implement or review per user request; always sync via `.agent/`
+
+## Session start (non-trivial work)
+
+1. Read `.agent/PROJECT_CONTEXT.md` and `.agent/STATUS.md`
+2. For multi-file changes: write or update `.agent/PLAN.md` before coding
+3. Plan review: `bash scripts/request_codex_review.sh --plan`
+4. After implementation: record changes in `.agent/CLAUDE_IMPLEMENTATION.md`
+5. Implement review: `bash scripts/request_codex_review.sh`
+6. Fix `critical`/`major` findings in `.agent/CODEX_REVIEW.md`; update `.agent/STATUS.md`
+
+## Review format (`.agent/CODEX_REVIEW.md`)
+
+Use severity: `critical` | `major` | `minor`. Verdict: `approved` | `fix-required`.
+
+## Boundaries
+
+- Do not commit `.agent/`, `.claude/`, `.codex/`, secrets, generated audio, or voice_bank assets unless user asks
+- `story_reader/` is a separate git repo — use `git -C story_reader ...`
+- Only commit when the user explicitly asks

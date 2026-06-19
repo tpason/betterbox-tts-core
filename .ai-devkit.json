@@ -1,0 +1,58 @@
+{
+  "version": "0.42.0",
+  "environments": [
+    "cursor",
+    "codex"
+  ],
+  "phases": [
+    "requirements",
+    "design",
+    "planning",
+    "implementation",
+    "testing"
+  ],
+  "skills": [
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "agent-communication"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "agent-orchestration"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "dev-lifecycle"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "dev-review"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "verify"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "memory"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "tdd"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "structured-debug"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "security-review"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "simplify-implementation"
+    }
+  ],
+  "createdAt": "2026-06-19T00:00:00.000Z",
+  "updatedAt": "2026-06-19T03:45:42.622Z"
+}

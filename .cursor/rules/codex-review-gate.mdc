@@ -1,0 +1,51 @@
+---
+description: Mandatory Codex review gate after plan or implementation — uses ai-devkit + request_codex_review.sh
+alwaysApply: true
+---
+
+# Codex Review Gate (ai-devkit)
+
+After **plan** or **implement**, Cursor MUST request Codex review. Do not mark work complete without review (or documented fallback).
+
+## Workflow
+
+### Plan (multi-file / risky change)
+
+1. Write `.agent/PLAN.md`
+2. Run: `bash scripts/request_codex_review.sh --plan`
+3. Read `.agent/CODEX_REVIEW.md` — fix plan if `fix-required` before coding
+
+### Implement
+
+1. Implement + verify
+2. Write `.agent/CLAUDE_IMPLEMENTATION.md` (status: `ready-for-review`)
+3. Run: `bash scripts/request_codex_review.sh`
+4. Fix all `critical` and `major` findings; re-run review if substantial
+
+## ai-devkit commands
+
+```bash
+ai-devkit agent list --json          # Codex must be running in this repo
+bash scripts/request_codex_review.sh --plan
+bash scripts/request_codex_review.sh
+bash scripts/request_codex_review.sh --send-only   # fire-and-forget
+```
+
+Fallback CLI: `npx ai-devkit@latest agent ...` if `ai-devkit` not on PATH.
+
+## If Codex unavailable
+
+1. Note in `.agent/STATUS.md`: "Codex skipped — Cursor self-review"
+2. Use skill `betterbox-code-review` → write `.agent/CODEX_REVIEW.md`
+3. Retry when Codex is running
+
+## Coordination files
+
+| File | When |
+|---|---|
+| `.agent/PLAN.md` | Before implement |
+| `.agent/CLAUDE_IMPLEMENTATION.md` | After implement |
+| `.agent/CODEX_REVIEW.md` | Codex output |
+| `.agent/STATUS.md` | After review loop |
+
+Config: `.ai-devkit.json` — skills `agent-communication`, `agent-orchestration`, `dev-review`.
