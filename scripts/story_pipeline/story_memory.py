@@ -399,6 +399,18 @@ def load_story_memory(
     return memory
 
 
+def extend_story_memory_glossary(
+    memory: StoryMemory,
+    new_items: list[dict[str, Any]],
+) -> StoryMemory:
+    """Append glossary entries in-memory and refresh replacement map."""
+    if not new_items:
+        return memory
+    memory.glossary.extend(new_items)
+    memory.replacements.update(_collect_glossary_replacements(new_items))
+    return memory
+
+
 def _locked_json_update(path: Path, update_fn) -> bool:
     """Atomic read-modify-write một JSON dict file, an toàn với nhiều worker.
 

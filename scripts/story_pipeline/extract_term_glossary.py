@@ -90,7 +90,11 @@ _EN_PHRASE_STOP_FIRST = {
     "Chapter", "Translator", "Editor", "Author", "Note",
 }
 
-# Cụm >=2 từ Capitalized (cho phép of/the/at/in/and ở giữa): "Core Formation",
+# Suffix patterns that signal cultivation terms even when phrase appears once.
+_EN_TECHNIQUE_SUFFIX_RE = re.compile(
+    r"\b([A-Z][a-zA-Z'\-]+(?:\s+[A-Z][a-zA-Z'\-]+){0,4})\s+"
+    r"(Technique|Art|Method|Scripture|Manual|Sect|Clan|Order|Pavilion|Peak|Realm|Stage|Record|Tribulation)\b"
+)
 # "Three Flowers Gathered at the Peak", "Heavenly Demon Sect".
 _EN_PHRASE_RE = re.compile(
     r"\b([A-Z][a-zA-Z'\-]+(?:\s+(?:of|the|at|in|and|[A-Z][a-zA-Z'\-]+)){1,6})\b"
@@ -151,8 +155,8 @@ def mine_candidate_terms(
     texts: list[str],
     *,
     lang: str = "en",
-    min_count: int = 3,
-    max_terms: int = 50,
+    min_count: int = 2,
+    max_terms: int = 80,
 ) -> list[dict[str, Any]]:
     """Tìm recurring candidate terms. Returns [{term, context}] sorted by frequency."""
     counts: Counter[str] = Counter()
@@ -184,6 +188,14 @@ def mine_candidate_terms(
             bracket_counts[phrase] += 1
             if phrase not in contexts:
                 contexts[phrase] = _first_sentence_with(text, m.group(1))
+        if lang == "en":
+            for m in _EN_TECHNIQUE_SUFFIX_RE.finditer(text):
+                phrase = _clean_phrase(m.group(0))
+                if len(phrase) < 4 or len(phrase) > 60:
+                    continue
+                bracket_counts[phrase] += 1
+                if phrase not in contexts:
+                    contexts[phrase] = _first_sentence_with(text, m.group(0))
 
     # Gộp phrase con vào phrase dài hơn nếu phrase dài phổ biến tương đương
     # (ví dụ "Three Flowers" vs "Three Flowers Gathered at the Peak").
@@ -366,6 +378,113 @@ def merge_glossary(
     return merged, added
 
 
+# ── Per-chunk glossary supplement (Phase 2) ─────────────────────────────────────
+
+def should_chunk_glossary_supplement(genre: str) -> bool:
+    """True when translate should resolve unknown cultivation terms per chunk."""
+    tokens = {t.strip() for t in (genre or "").replace(",", " ").split() if t.strip()}
+    return bool(tokens.intersection(_HAN_VIET_GENRES))
+
+
+def _glossary_surfaces_from_items(items: list[dict[str, Any]]) -> set[str]:
+    covered: set[str] = set()
+    for item in items:
+        for key in ("source_terms", "source", "canonical_vi", "vi", "canonical", "variants"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                covered.add(_norm_term(value))
+            elif isinstance(value, list):
+                covered.update(_norm_term(str(v)) for v in value if str(v).strip())
+    return covered
+
+
+def mine_chunk_candidate_terms(
+    text: str,
+    *,
+    lang: str = "en",
+    max_terms: int = 12,
+) -> list[dict[str, Any]]:
+    """Mine candidate terms from a single chunk (min_count=1 for first appearance)."""
+    return mine_candidate_terms([text], lang=lang, min_count=1, max_terms=max_terms)
+
+
+def resolve_chunk_glossary_supplement(
+    text: str,
+    *,
+    memory: Any,
+    genre: str,
+    story_title: str = "",
+    story_id: str = "",
+    slug: str = "",
+    ollama_url: str = "",
+    model: str = "qwen3:14b",
+    max_terms: int = 8,
+    resolved_cache: set[str] | None = None,
+    persist: bool = True,
+) -> tuple[list[dict[str, Any]], Any]:
+    """Resolve unknown terms in one chunk via quick LLM glossary batch.
+
+    Returns (new_items, updated_memory). Never raises — failures return unchanged memory.
+    """
+    from story_memory import extend_story_memory_glossary, load_seed_glossary
+
+    if not text.strip() or not should_chunk_glossary_supplement(genre):
+        return [], memory
+    if not ollama_url:
+        return [], memory
+
+    lang = "en"
+    if not re.search(r"[A-Za-z]", text[:400]):
+        lang = "vi"
+
+    candidates = mine_chunk_candidate_terms(text, lang=lang, max_terms=max_terms + 4)
+    covered = _glossary_surfaces_from_items(memory.glossary)
+    covered.update(_glossary_surfaces_from_items(load_seed_glossary(genre)))
+    if resolved_cache:
+        covered.update(resolved_cache)
+
+    unknown = [c for c in candidates if _norm_term(c["term"]) not in covered][:max_terms]
+    if not unknown:
+        return [], memory
+
+    try:
+        new_items = call_ollama_glossary(
+            ollama_url,
+            model,
+            unknown,
+            story_title=story_title or slug or story_id or "story",
+            genre=genre,
+            timeout=180,
+        )
+    except Exception as exc:
+        print(f"[CHUNK_GLOSSARY WARN] LLM failed: {exc}")
+        return [], memory
+
+    if not new_items:
+        return [], memory
+
+    if resolved_cache is not None:
+        for item in new_items:
+            for src in item.get("source_terms") or []:
+                resolved_cache.add(_norm_term(str(src)))
+
+    memory = extend_story_memory_glossary(memory, new_items)
+
+    if persist and story_id and slug:
+        try:
+            g_path = glossary_path_for(story_id, slug)
+            existing = load_existing_glossary(g_path)
+            merged, added = merge_glossary(existing, new_items)
+            if added:
+                g_path.parent.mkdir(parents=True, exist_ok=True)
+                g_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                print(f"[CHUNK_GLOSSARY] persisted +{added} → {g_path.name}")
+        except Exception as exc:
+            print(f"[CHUNK_GLOSSARY WARN] persist failed: {exc}")
+
+    return new_items, memory
+
+
 # ── Main update API (dùng bởi CLI và polish_worker) ─────────────────────────────
 
 def update_term_glossary(
@@ -378,8 +497,8 @@ def update_term_glossary(
     ollama_url: str = "http://127.0.0.1:11434",
     model: str = "qwen3:14b",
     genre: str = "",
-    min_count: int = 3,
-    max_terms: int = 50,
+    min_count: int = 2,
+    max_terms: int = 80,
     dry_run: bool = False,
     unload_after: bool = False,
 ) -> dict[str, Any]:

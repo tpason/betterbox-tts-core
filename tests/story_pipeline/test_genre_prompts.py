@@ -13,10 +13,12 @@ for path in (ROOT, SCRIPT_DIR):
 from genre_prompts import (
     GENRE_HE_THONG,
     GENRE_HUYEN_HUYEN,
+    GENRE_KOREAN_CULTIVATION,
     GENRE_TIEN_HIEP,
     GENRE_WESTERN_FANTASY,
     detect_genre,
     get_translate_genre_addendum,
+    infer_genre_from_story_signals,
     resolve_genre_from_context,
 )
 
@@ -72,6 +74,29 @@ class GenrePromptsTest(unittest.TestCase):
         self.assertEqual(
             resolve_genre_from_context("Fantasy", raw_language="vi", source_code="hako", char_map=char_map),
             GENRE_WESTERN_FANTASY,
+        )
+
+    def test_regressor_cultivation_title_detects_korean_cultivation(self) -> None:
+        genre = infer_genre_from_story_signals(
+            title="A Regressor's Tale of Cultivation",
+            raw_language="en",
+            source_code="wetriedtls",
+        )
+        self.assertEqual(genre, f"{GENRE_KOREAN_CULTIVATION},trong_sinh")
+
+    def test_blank_category_wetriedtls_cultivation_not_western_fantasy(self) -> None:
+        self.assertEqual(
+            detect_genre("A Regressor's Tale of Cultivation", raw_language="en", source_code="wetriedtls"),
+            GENRE_KOREAN_CULTIVATION,
+        )
+        self.assertEqual(
+            resolve_genre_from_context(
+                "",
+                title="A Regressor's Tale of Cultivation",
+                raw_language="en",
+                source_code="wetriedtls",
+            ),
+            f"{GENRE_KOREAN_CULTIVATION},trong_sinh",
         )
 
 

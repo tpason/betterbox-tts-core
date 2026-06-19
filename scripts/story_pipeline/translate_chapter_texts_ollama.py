@@ -467,6 +467,63 @@ def _tail_context(text: str, max_chars: int = 1200) -> str:
     return tail
 
 
+def _story_title_for_args(args: argparse.Namespace, story_id: str, story_slug: str) -> str:
+    title = str(getattr(args, "story_title", "") or "").strip()
+    if title or not story_id:
+        return title
+    try:
+        from story_db.story_pipeline_db import repository as repo
+
+        story = repo.get_story_by_id(story_id)
+        return str(story.get("original_title") or story.get("title") or story_slug or "")
+    except Exception:
+        return story_slug
+
+
+def _maybe_supplement_chunk_glossary(
+    chunk: str,
+    *,
+    story_memory,
+    genre: str,
+    args: argparse.Namespace,
+    story_id: str,
+    story_slug: str,
+):
+    if getattr(args, "no_chunk_glossary", False):
+        return story_memory
+    try:
+        from extract_term_glossary import resolve_chunk_glossary_supplement, should_chunk_glossary_supplement
+    except ImportError:
+        return story_memory
+    if not should_chunk_glossary_supplement(genre):
+        return story_memory
+
+    resolved_cache: set[str] | None = getattr(args, "_chunk_glossary_resolved", None)
+    if resolved_cache is None:
+        resolved_cache = set()
+        args._chunk_glossary_resolved = resolved_cache
+
+    new_items, updated = resolve_chunk_glossary_supplement(
+        chunk,
+        memory=story_memory,
+        genre=genre,
+        story_title=_story_title_for_args(args, story_id, story_slug),
+        story_id=story_id,
+        slug=story_slug,
+        ollama_url=args.ollama_url,
+        model=args.model,
+        resolved_cache=resolved_cache,
+        persist=True,
+    )
+    if new_items:
+        names = ", ".join(
+            str(i.get("canonical_vi") or i.get("source_terms", [""])[0]) for i in new_items[:4]
+        )
+        more = f" (+{len(new_items) - 4})" if len(new_items) > 4 else ""
+        print(f"[CHUNK_GLOSSARY] +{len(new_items)}: {names}{more}")
+    return updated
+
+
 def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace) -> None:
     raw_text = clean_source_noise(input_path.read_text(encoding="utf-8")).strip()
     if not raw_text:
@@ -514,6 +571,14 @@ def translate_file(input_path: Path, output_path: Path, args: argparse.Namespace
     with requests.Session() as session:
         for idx, chunk in enumerate(chunks, start=1):
             print(f"[{idx}/{len(chunks)}] Translate {len(chunk)} chars with {args.model}" + (f" +ctx={len(preceding_context)}c" if preceding_context else ""))
+            story_memory = _maybe_supplement_chunk_glossary(
+                chunk,
+                story_memory=story_memory,
+                genre=genre,
+                args=args,
+                story_id=story_id,
+                story_slug=story_slug,
+            )
             story_memory_context = build_story_memory_prompt(
                 story_memory,
                 f"{preceding_context}\n\n{chunk}".strip(),
@@ -859,6 +924,14 @@ def single_pass_translate_polish_file(
         for idx, chunk in enumerate(chunks, start=1):
             ctx_note = f" +ctx={len(preceding_vi_context)}c" if preceding_vi_context else ""
             print(f"[{idx}/{len(chunks)}] Single-pass {len(chunk)} chars{ctx_note}")
+            story_memory = _maybe_supplement_chunk_glossary(
+                chunk,
+                story_memory=story_memory,
+                genre=genre,
+                args=args,
+                story_id=story_id,
+                story_slug=story_slug,
+            )
             story_memory_context = build_story_memory_prompt(
                 story_memory,
                 f"{preceding_vi_context}\n\n{chunk}".strip(),

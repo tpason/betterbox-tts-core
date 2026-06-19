@@ -1645,5 +1645,45 @@
     "priority": true,
     "wrong_translations": ["Kỹ Thuật Bí Mật", "Phương Pháp Bí Ẩn", "Thuật Ẩn"],
     "meaning": "bí thuật ẩn truyền, thường tiêu hao nhiều để đổi lấy sức mạnh đột biến"
+  },
+  {
+    "source_terms": ["Spiritual Root", "Spirit Root", "Root Bone", "靈根", "灵根"],
+    "canonical_vi": "Linh Căn",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Rễ Linh Hồn", "Căn Linh", "Gốc Rễ Tinh Thần", "Spirit Root"],
+    "meaning": "tư chất tu luyện bẩm sinh — thuật ngữ tu tiên cốt lõi"
+  },
+  {
+    "source_terms": ["Inner Demon", "Heart Demon", "心魔"],
+    "canonical_vi": "Tâm Ma",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Con Quỷ Bên Trong", "Ma Tâm", "Quỷ Nội Tâm"],
+    "meaning": "ẩn họa tâm trí khi tu luyện hoặc đột phá"
+  },
+  {
+    "source_terms": ["Ascension Path", "Path of Ascension", "Immortal Path", "Road to Immortality"],
+    "canonical_vi": "Đăng Tiên Chi Lộ",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Con Đường Thăng Tiên", "Lối Tu Tiên", "Đường Thăng Thiên"],
+    "meaning": "con đường tu luyện hướng tới cảnh giới cao / thành tiên"
+  },
+  {
+    "source_terms": ["Heavenly Tribulation", "Lightning Tribulation", "天劫"],
+    "canonical_vi": "Thiên Kiếp",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Kiếp Sét", "Tai Họa Trời", "Thiên Lôi Kiếp"],
+    "meaning": "thiên kiếp khi đột phá cảnh giới — sét trời trừng phạt tu sĩ"
+  },
+  {
+    "source_terms": ["Meridian", "Meridians", "經脈", "经脉"],
+    "canonical_vi": "Kinh Mạch",
+    "kind": "other",
+    "priority": true,
+    "wrong_translations": ["Mạch Kinh", "Đường Kinh", "Meridian"],
+    "meaning": "đường linh khí tuần hoàn trong cơ thể tu sĩ"
   }
 ]

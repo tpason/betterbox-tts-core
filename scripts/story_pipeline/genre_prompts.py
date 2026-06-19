@@ -149,23 +149,72 @@ def detect_genre(category: str, raw_language: str = "", source_code: str = "") -
     return ""
 
 
+_REGRESSION_MARKERS: tuple[str, ...] = (
+    "regressor", "regression", "regressed", "returner", "time regression", "hoi quy", "hồi quy",
+)
+
+
+def infer_genre_from_story_signals(
+    *,
+    category: str = "",
+    title: str = "",
+    description: str = "",
+    raw_language: str = "",
+    source_code: str = "",
+) -> str:
+    """Detect genre from category + title + description (auto when DB category empty).
+
+    EN/KO cultivation titles like "A Regressor's Tale of Cultivation" must not fall
+    through to western_fantasy just because category is blank.
+    """
+    parts = [p.strip() for p in (category or "", title or "", description or "") if p and p.strip()]
+    combined = " ".join(parts)
+    if not combined:
+        return detect_genre("", raw_language=raw_language, source_code=source_code)
+
+    detected = detect_genre(combined, raw_language=raw_language, source_code=source_code)
+    lower = combined.lower()
+    has_regression = any(kw in lower for kw in _REGRESSION_MARKERS)
+    has_cultivation = any(kw in lower for kw in _CULTIVATION_MARKERS)
+
+    if has_cultivation and detected in {GENRE_KOREAN_CULTIVATION, GENRE_TIEN_HIEP, ""}:
+        if has_regression:
+            return f"{GENRE_KOREAN_CULTIVATION},trong_sinh"
+        return GENRE_KOREAN_CULTIVATION if detected != GENRE_TIEN_HIEP else detected
+
+    # Title/description may carry cultivation signal while category-only detect misses it.
+    if detected == GENRE_WESTERN_FANTASY and has_cultivation:
+        base = GENRE_KOREAN_CULTIVATION
+        return f"{base},trong_sinh" if has_regression else base
+
+    return detected
+
+
 def resolve_genre_from_context(
     category: str = "",
     raw_language: str = "",
     source_code: str = "",
     char_map_file: str = "",
     char_map: str = "",
+    title: str = "",
+    description: str = "",
 ) -> str:
     """Resolve genre from DB metadata and optional character-map story rules.
 
     Metadata wins when it is specific. Character map fills missing metadata and can
     override ambiguous `fantasy` → `huyen_huyen` guesses for Western/Korean stories.
     """
-    detected = detect_genre(category, raw_language=raw_language, source_code=source_code)
+    detected = infer_genre_from_story_signals(
+        category=category,
+        title=title,
+        description=description,
+        raw_language=raw_language,
+        source_code=source_code,
+    )
     map_text = char_map or load_char_map(char_map_file)
     inferred = infer_genre_from_char_map(map_text) if map_text else ""
 
-    if inferred and (not detected or detected == GENRE_HUYEN_HUYEN):
+    if inferred and (not detected or detected in {GENRE_HUYEN_HUYEN, GENRE_WESTERN_FANTASY}):
         return inferred
     return detected or inferred
 
@@ -510,24 +559,62 @@ def get_seed_realm_format_hints(genre: str) -> str:
     return "Quy tắc cảnh giới/cấp độ (bắt buộc):\n" + "\n".join(lines)
 
 
+_UNKNOWN_CULTIVATION_TERM_FALLBACK = """\
+Thuật ngữ tu luyện CHƯA có trong glossary — vẫn bắt buộc Hán Việt, KHÔNG dịch nghĩa từng chữ:
+- "Ascension Path" → "Đăng Tiên Chi Lộ" (KHÔNG "con đường thăng tiên")
+- "Spiritual Root" / "Spirit Root" → "Linh Căn" (KHÔNG "rễ linh hồn")
+- "Inner Demon" → "Tâm Ma" (KHÔNG "con quỷ bên trong")
+- "Void Slash" → "Hư Không Trảm" (KHÔNG "chém hư không")
+- Cụm *Technique/Art/Sect/Record/Manual* EN: dịch Hán Việt trang trọng theo nghĩa văn học tu tiên.\
+"""
+
+_HAN_VIET_GENRE_TOKENS = frozenset({
+    GENRE_TIEN_HIEP,
+    GENRE_KOREAN_CULTIVATION,
+    GENRE_KIEM_HIEP,
+    GENRE_HUYEN_HUYEN,
+})
+
+
+def _genre_tokens(genre: str) -> list[str]:
+    return [g.strip() for g in (genre or "").replace(",", " ").split() if g.strip()]
+
+
+def _combine_genre_addendums(mapping: dict[str, str], genre: str) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for token in _genre_tokens(genre):
+        block = mapping.get(token, "").strip()
+        if block and block not in seen:
+            seen.add(block)
+            parts.append(block)
+    return "\n\n".join(parts)
+
+
+def _needs_unknown_cultivation_fallback(genre: str) -> bool:
+    return bool(_HAN_VIET_GENRE_TOKENS.intersection(_genre_tokens(genre)))
+
+
 def get_polish_genre_addendum(genre: str) -> str:
     """Return genre-specific text to append to polish system prompt. Empty → no change."""
-    base = _POLISH_GENRE_ADDENDUM.get(genre, "").strip()
+    base = _combine_genre_addendums(_POLISH_GENRE_ADDENDUM, genre)
     realm_hints = get_seed_realm_format_hints(genre)
     if realm_hints:
-        return f"{base}\n{realm_hints}".strip() if base else realm_hints
+        base = f"{base}\n{realm_hints}".strip() if base else realm_hints
+    if _needs_unknown_cultivation_fallback(genre):
+        base = f"{base}\n{_UNKNOWN_CULTIVATION_TERM_FALLBACK}".strip() if base else _UNKNOWN_CULTIVATION_TERM_FALLBACK
     return base
 
 
 def get_translate_genre_addendum(genre: str, *, for_english_model: bool = False) -> str:
     """Return genre-specific text to append to translate system prompt."""
-    if for_english_model:
-        base = _TRANSLATE_GENRE_ADDENDUM_EN.get(genre, "").strip()
-    else:
-        base = _TRANSLATE_GENRE_ADDENDUM.get(genre, "").strip()
+    mapping = _TRANSLATE_GENRE_ADDENDUM_EN if for_english_model else _TRANSLATE_GENRE_ADDENDUM
+    base = _combine_genre_addendums(mapping, genre)
     realm_hints = get_seed_realm_format_hints(genre)
     if realm_hints:
-        return f"{base}\n{realm_hints}".strip() if base else realm_hints
+        base = f"{base}\n{realm_hints}".strip() if base else realm_hints
+    if _needs_unknown_cultivation_fallback(genre):
+        base = f"{base}\n{_UNKNOWN_CULTIVATION_TERM_FALLBACK}".strip() if base else _UNKNOWN_CULTIVATION_TERM_FALLBACK
     return base
 
 

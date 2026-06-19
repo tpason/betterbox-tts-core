@@ -26,7 +26,12 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from story_db.story_pipeline_db import repository as repo
 from story_db.story_pipeline_db.db import connect
-from genre_prompts import detect_genre, find_char_map_file, resolve_genre_from_context
+from genre_prompts import detect_genre, find_char_map_file, load_char_map, resolve_genre_from_context
+from story_memory import (
+    apply_seed_glossary_replacements,
+    build_story_memory_prompt,
+    load_story_memory,
+)
 from scripts.story_pipeline.polish_chapter_texts_ollama import clean_for_audiobook_tts, polish_file
 from scripts.story_pipeline.polish_worker import read_formatted_output, read_formatted_polished_output
 from scripts.story_pipeline.translate_chapter_texts_ollama import translate_file
@@ -98,6 +103,23 @@ EN_WORDS = {
     "he",
 }
 
+METADATA_TERM_RULES = """Quy ước thuật ngữ bắt buộc:
+- regressor / regression / regressed: dịch theo nghĩa hồi quy thời gian/hoàn nguyên về quá khứ. Dùng "Hồi Quy Giả", "người hồi quy", hoặc "hồi quy" tùy ngữ cảnh. Tuyệt đối không dịch thành "hồi phục".
+- returner: người trở về / kẻ trở về; nếu ngữ cảnh là quay lại quá khứ thì ưu tiên "hồi quy".
+- reincarnator / reincarnation: chuyển sinh / tái sinh, không lẫn với hồi quy.
+- cultivation: tu chân / tu luyện; cultivator: tu sĩ / người tu luyện.
+- tale / story trong tên truyện: ưu tiên "Truyện", "Chuyện", hoặc bỏ nếu tên Việt tự nhiên hơn.
+- Không dịch word-by-word nếu tạo tên Việt gượng. Ưu tiên tên tự nhiên cho web đọc truyện nhưng giữ đúng trope chính.
+"""
+
+
+def _metadata_context_block(context: str = "") -> str:
+    cleaned = re.sub(r"\n{3,}", "\n\n", (context or "").strip())
+    if not cleaned:
+        cleaned = "Không có context thêm."
+    return f"{METADATA_TERM_RULES}\n\nContext truyện:\n{cleaned}"
+
+
 STORY_TITLE_PROMPT = """Bạn là biên tập viên tên truyện tiếng Việt.
 
 Hãy dịch/chỉnh tên truyện sau thành một tên tiếng Việt tự nhiên, dễ đọc cho web đọc truyện.
@@ -106,7 +128,10 @@ Yêu cầu:
 - Không thêm giải thích.
 - Không thêm dấu ngoặc kép.
 - Giữ đúng nghĩa chính, không bịa thể loại mới.
+- Dùng context và quy ước thuật ngữ bên dưới; không dịch từng chữ máy móc.
 - Nếu tên đã là tiếng Việt, chỉ chuẩn hóa chính tả/viết hoa.
+
+{context}
 
 Tên nguồn: {title}
 """
@@ -120,9 +145,28 @@ Yêu cầu:
 - Văn phong mượt, rõ nghĩa, hợp truyện chữ.
 - Không markdown, không tiêu đề, không giải thích.
 - Chỉ trả về phần mô tả tiếng Việt.
+- Dùng context và quy ước thuật ngữ bên dưới để giữ trope/thuật ngữ nhất quán với nội dung chương.
+
+{context}
 
 Mô tả nguồn:
 {description}
+"""
+
+CHAPTER_TITLE_PROMPT = """Bạn là biên tập viên tên chương truyện tiếng Việt.
+
+Dịch tiêu đề chương sau sang tiếng Việt tự nhiên cho web đọc truyện.
+Yêu cầu:
+- Chỉ trả về đúng tiêu đề chương, không thêm giải thích.
+- Không thêm dấu ngoặc kép.
+- Giữ đúng nghĩa, không bịa thêm nội dung.
+- Nếu có số chương (Chapter 1, Ch. 42...), giữ nguyên hoặc đổi thành "Chương X".
+- Dùng context và quy ước thuật ngữ bên dưới; không dịch từng chữ máy móc.
+- Nếu tiêu đề đã là tiếng Việt, chỉ chuẩn hóa chính tả/viết hoa.
+
+{context}
+
+Tiêu đề nguồn: {title}
 """
 
 STORY_AUTHOR_PROMPT = """Bạn là biên tập viên tên tác giả tiếng Việt.
@@ -242,6 +286,126 @@ def clean_model_text(value: str, *, max_len: int = 0) -> str:
     return text
 
 
+def _truncate_context(value: str, max_chars: int = 2400) -> str:
+    cleaned = re.sub(r"\s+\n", "\n", (value or "").strip())
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[:max_chars].rstrip() + "\n..."
+
+
+def build_metadata_memory_context(
+    *,
+    story_id: str = "",
+    story_slug_value: str = "",
+    char_map_file: str = "",
+    genre: str = "",
+    story_memory_dir: str = "",
+    reference_text: str = "",
+    max_chars: int = 3500,
+) -> str:
+    """Compact story memory / glossary block for metadata translation prompts."""
+    memory = load_story_memory(
+        story_memory_dir=story_memory_dir,
+        story_id=story_id,
+        slug=story_slug_value,
+        char_map_file=char_map_file,
+    )
+    memory = apply_seed_glossary_replacements(memory, genre)
+    if not memory.loaded and not genre:
+        return ""
+    hint = reference_text.strip() or "story title description chapter heading glossary terms"
+    block = build_story_memory_prompt(
+        memory,
+        hint,
+        genre=genre,
+        max_chars=max_chars,
+        current_chapter=0,
+    )
+    if block:
+        return f"story_memory_excerpt:\n{block}"
+    return ""
+
+
+def build_metadata_translation_context(
+    *,
+    story_id: str = "",
+    story_slug_value: str = "",
+    source_code: str = "",
+    story_title: str = "",
+    original_title: str = "",
+    display_title: str = "",
+    description: str = "",
+    category: str = "",
+    raw_language: str = "",
+    char_map_file: str = "",
+    story_memory_dir: str = "",
+) -> str:
+    """Build compact story context for title/description translation.
+
+    Uses the same genre, char-map, and story-memory sources as chapter translate/polish
+    so metadata strings stay terminology-consistent with body text.
+    """
+    effective_char_map = char_map_file or find_char_map_file(story_id=story_id, slug=story_slug_value)
+    char_map_text = load_char_map(effective_char_map, story_id=story_id) if effective_char_map else ""
+    genre = resolve_genre_from_context(
+        category or "",
+        raw_language=raw_language,
+        source_code=source_code,
+        char_map_file=effective_char_map,
+        char_map=char_map_text,
+        title=original_title or story_title,
+        description=description,
+    )
+    lines = [
+        f"source_code: {source_code or '-'}",
+        f"raw_language: {raw_language or '-'}",
+        f"genre: {genre or detect_genre(category or '', raw_language=raw_language, source_code=source_code) or '-'}",
+        f"story_slug: {story_slug_value or '-'}",
+        f"source_title: {original_title or story_title or '-'}",
+    ]
+    if display_title:
+        lines.append(f"current_vi_title: {display_title}")
+    if category:
+        lines.append(f"category: {category}")
+    if char_map_text:
+        lines.append("char_map_excerpt:")
+        lines.append(_truncate_context(char_map_text, 1800))
+    ref = " ".join(p for p in (original_title or story_title, description) if p).strip()
+    memory_block = build_metadata_memory_context(
+        story_id=story_id,
+        story_slug_value=story_slug_value,
+        char_map_file=effective_char_map,
+        genre=genre,
+        story_memory_dir=story_memory_dir,
+        reference_text=ref,
+    )
+    if memory_block:
+        lines.append(memory_block)
+    return "\n".join(lines)
+
+
+def build_metadata_translation_context_from_row(row: dict[str, Any], args: argparse.Namespace) -> str:
+    raw_language = likely_raw_language(row)
+    slug = story_slug(row)
+    char_map_file = getattr(args, "char_map_file", "") or find_char_map_file(
+        story_id=str(row.get("story_id") or ""),
+        slug=slug,
+    )
+    return build_metadata_translation_context(
+        story_id=str(row.get("story_id") or ""),
+        story_slug_value=slug,
+        source_code=str(row.get("source_code") or ""),
+        story_title=str(row.get("story_title") or ""),
+        original_title=str(row.get("story_original_title") or ""),
+        display_title=str(row.get("story_display_title") or ""),
+        description=str(row.get("story_description") or row.get("source_description") or ""),
+        category=str(row.get("story_category") or ""),
+        raw_language=raw_language,
+        char_map_file=char_map_file,
+        story_memory_dir=getattr(args, "story_memory_dir", ""),
+    )
+
+
 def first_content_line(text: str) -> str:
     for line in (text or "").splitlines():
         cleaned = re.sub(r"\s+", " ", line).strip()
@@ -253,12 +417,27 @@ def first_content_line(text: str) -> str:
 _PROSE_SENTENCE_RE = re.compile(r"[!?]\s+\S|[.]\s+[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĐÀ-ỹ]")
 
 
-def maybe_update_translated_chapter_title(chapter_id: str, translated_text_content: str) -> str:
-    title = first_content_line(translated_text_content)
+def chapter_title_from_content(text: str, *, tts_clean: bool = True) -> str:
+    """Derive chapter heading from polished/translated body (first line, TTS-safe).
+
+    Single source of truth for chapter titles — matches what TTS reads first.
+    """
+    body = (text or "").strip()
+    if not body:
+        return ""
+    if tts_clean:
+        body = clean_for_audiobook_tts(body).strip()
+    title = first_content_line(body)
     if not title or len(title) > 120:
         return ""
-    # Dòng đầu chứa nhiều câu văn xuôi → không phải title chapter
     if _PROSE_SENTENCE_RE.search(title):
+        return ""
+    return title
+
+
+def maybe_update_translated_chapter_title(chapter_id: str, translated_text_content: str) -> str:
+    title = chapter_title_from_content(translated_text_content)
+    if not title:
         return ""
     repo.update_chapter_title(chapter_id, title)
     return title
@@ -300,13 +479,13 @@ def call_ollama_generate(
     raise RuntimeError(f"Ollama failed after {retries} retries: {last_error}")
 
 
-def translate_story_title(source_title: str, args: argparse.Namespace) -> str:
+def translate_story_title(source_title: str, args: argparse.Namespace, *, context: str = "") -> str:
     raw = call_ollama_generate(
         base_url=args.ollama_url,
         model=args.story_model or args.translate_model,
-        prompt=STORY_TITLE_PROMPT.format(title=source_title),
+        prompt=STORY_TITLE_PROMPT.format(title=source_title, context=_metadata_context_block(context)),
         temperature=0.15,
-        num_ctx=2048,
+        num_ctx=max(4096, int(getattr(args, "num_ctx", 4096) or 4096)),
         timeout=args.ollama_timeout,
         retries=args.ollama_retries,
         keep_alive=args.keep_alive,
@@ -314,11 +493,14 @@ def translate_story_title(source_title: str, args: argparse.Namespace) -> str:
     return clean_model_text(raw, max_len=180)
 
 
-def translate_story_description(description: str, args: argparse.Namespace) -> str:
+def translate_story_description(description: str, args: argparse.Namespace, *, context: str = "") -> str:
     raw = call_ollama_generate(
         base_url=args.ollama_url,
         model=args.story_model or args.translate_model,
-        prompt=STORY_DESCRIPTION_PROMPT.format(description=description),
+        prompt=STORY_DESCRIPTION_PROMPT.format(
+            description=description,
+            context=_metadata_context_block(context),
+        ),
         temperature=args.temperature,
         num_ctx=args.num_ctx,
         timeout=args.ollama_timeout,
@@ -340,6 +522,20 @@ def translate_story_author(author: str, args: argparse.Namespace) -> str:
         keep_alive=args.keep_alive,
     )
     return clean_model_text(raw, max_len=180)
+
+
+def translate_chapter_title(source_title: str, args: argparse.Namespace, *, context: str = "") -> str:
+    raw = call_ollama_generate(
+        base_url=args.ollama_url,
+        model=args.story_model or args.translate_model,
+        prompt=CHAPTER_TITLE_PROMPT.format(title=source_title, context=_metadata_context_block(context)),
+        temperature=0.1,
+        num_ctx=max(4096, int(getattr(args, "num_ctx", 4096) or 4096)),
+        timeout=args.ollama_timeout,
+        retries=args.ollama_retries,
+        keep_alive=args.keep_alive,
+    )
+    return clean_model_text(raw, max_len=200)
 
 
 def update_story_translation(
@@ -625,6 +821,7 @@ def translate_story_metadata_for_rows(rows: list[tuple[dict[str, Any], str]], ar
         story_metadata = row.get("story_metadata") or {}
         author_source = str(story_metadata.get("source_author") or row.get("story_author") or "").strip()
         description_source = str(row.get("story_description") or "").strip()
+        translation_context = build_metadata_translation_context_from_row(row, args)
         next_title: str | None = None
         next_author: str | None = None
         next_description: str | None = None
@@ -638,7 +835,7 @@ def translate_story_metadata_for_rows(rows: list[tuple[dict[str, Any], str]], ar
                 log(f"[DRY] story title {row['source_code']} {story_slug(row)}: {title_source}")
             else:
                 log(f"[STORY] translating title story={story_slug(row)} source={row['source_code']}")
-                next_title = translate_story_title(title_source, args)
+                next_title = translate_story_title(title_source, args, context=translation_context)
                 log(f"[STORY] title {title_source} -> {next_title}")
 
         if author_source and (
@@ -663,7 +860,7 @@ def translate_story_metadata_for_rows(rows: list[tuple[dict[str, Any], str]], ar
                     f"[STORY] translating description story={story_slug(row)} "
                     f"source={row['source_code']} chars={len(description_source)}"
                 )
-                next_description = translate_story_description(description_source, args)
+                next_description = translate_story_description(description_source, args, context=translation_context)
                 log(f"[STORY] description translated story={story_slug(row)} chars={len(next_description)}")
 
         if args.dry_run or (next_title is None and next_author is None and next_description is None):
@@ -759,7 +956,22 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
 
         fake_job = {"chapter_id": row["chapter_id"], "story_id": row["story_id"]}
         translated_text_content = read_formatted_output(_tmp_translated, fake_job, write_back=True, label="translated")
-        translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
+        # Translate chapter title: LLM preferred (source EN title), fallback to first-line heuristic
+        source_chapter_title = str(row.get("chapter_title") or "").strip()
+        translated_chapter_title = ""
+        if source_chapter_title:
+            try:
+                translated_chapter_title = translate_chapter_title(
+                    source_chapter_title,
+                    args,
+                    context=build_metadata_translation_context_from_row(row, args),
+                )
+                if translated_chapter_title:
+                    repo.update_chapter_title(row["chapter_id"], translated_chapter_title)
+            except Exception as _exc:  # noqa: BLE001
+                log(f"[TITLE] LLM chapter title failed ({_exc}), falling back to first-line")
+        if not translated_chapter_title:
+            translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
         if translated_chapter_title:
             log(f"[DB] chapter title translated {label}: {translated_chapter_title}")
 
@@ -767,6 +979,7 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
             row["chapter_id"],
             translated_text_path=None,
             translated_text_content=translated_text_content,
+            clear_audio=getattr(args, "overwrite_translation", False),
         )
 
         polish_job = repo.enqueue_chapter_job(
@@ -783,6 +996,7 @@ def _process_row_queue_mode(row: dict[str, Any], reason: str, args: argparse.Nam
                 "story_slug": slug,
                 "chapter_number": row["chapter_number"],
                 "chapter_title": row.get("chapter_title") or Path(stable_name).stem,
+                "source_chapter_title": row.get("chapter_title") or Path(stable_name).stem,
                 "genre": genre,
                 "char_map_file": char_map_file,
             },
@@ -885,7 +1099,22 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
         log(f"[FORMAT] translated start {label}")
         translated_text_content = read_formatted_output(_tmp_translated, job, write_back=True, label="translated")
         log(f"[FORMAT] translated done {label} chars={len(translated_text_content)}")
-        translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
+        # Translate chapter title: LLM preferred (source EN title), fallback to first-line heuristic
+        _src_ch_title = str(row.get("chapter_title") or "").strip()
+        translated_chapter_title = ""
+        if _src_ch_title:
+            try:
+                translated_chapter_title = translate_chapter_title(
+                    _src_ch_title,
+                    args,
+                    context=build_metadata_translation_context_from_row(row, args),
+                )
+                if translated_chapter_title:
+                    repo.update_chapter_title(row["chapter_id"], translated_chapter_title)
+            except Exception as _exc:  # noqa: BLE001
+                log(f"[TITLE] LLM chapter title failed ({_exc}), falling back to first-line")
+        if not translated_chapter_title:
+            translated_chapter_title = maybe_update_translated_chapter_title(row["chapter_id"], translated_text_content)
         if translated_chapter_title:
             log(f"[DB] chapter title translated {label}: {translated_chapter_title}")
 
@@ -927,6 +1156,7 @@ def process_row(row: dict[str, Any], reason: str, args: argparse.Namespace, *, i
             polished_text_path=None,
             translated_text_content=translated_text_content,
             polished_text_content=polished_text_content,
+            clear_audio=getattr(args, "overwrite_translation", False),
         )
         log(f"[DB] update chapter outputs done {label}")
         repo.complete_story_job(
