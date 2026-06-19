@@ -202,6 +202,14 @@ def extract_story_metadata(html: str, series_slug: str) -> dict[str, Any]:
 
 def upsert_catalog_to_db(metadata: dict[str, Any]) -> dict[str, Any]:
     from story_db.story_pipeline_db import repository as repo
+    from genre_prompts import infer_genre_from_story_signals
+
+    genre = infer_genre_from_story_signals(
+        title=metadata.get("title") or "",
+        description=metadata.get("description") or "",
+        raw_language="en",
+        source_code="wetriedtls",
+    )
     repo.upsert_source("wetriedtls", "We Tried TLs", BASE_URL)
     return repo.upsert_story(
         "wetriedtls",
@@ -222,6 +230,7 @@ def upsert_catalog_to_db(metadata: dict[str, Any]) -> dict[str, Any]:
                 "source": "wetriedtls",
                 "source_author": metadata.get("author") or "",
                 "source_description": metadata.get("description") or "",
+                "genre": genre,
             },
         },
     )
@@ -257,7 +266,14 @@ def enqueue_polish_job(*, story: dict[str, Any], db_chapter: dict[str, Any], slu
             "translate_story_metadata": True,
             "source_story_title": story.get("original_title") or story.get("title") or "",
             "post_translate": args.post_translate,
-            "genre": resolve_genre_from_context("", raw_language="en", source_code="wetriedtls", char_map_file=char_map_file),
+            "genre": resolve_genre_from_context(
+                "",
+                raw_language="en",
+                source_code="wetriedtls",
+                char_map_file=char_map_file,
+                title=str(story.get("original_title") or story.get("title") or ""),
+                description=str((story.get("metadata") or {}).get("source_description") or story.get("description") or ""),
+            ),
             "char_map_file": char_map_file,
         },
         max_attempts=args.polish_max_attempts,
