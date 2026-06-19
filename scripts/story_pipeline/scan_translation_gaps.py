@@ -98,6 +98,33 @@ def _mask_brackets(text: str) -> str:
     return _BRACKET_SPAN_RE.sub(lambda m: " " * len(m.group()), text)
 
 
+_JOB_TITLE_PREFIXES: frozenset[str] = frozenset(
+    [
+        "Manager", "Director", "Deputy", "Chief", "President", "Chairman",
+        "Manager", "Scout", "Scouts", "Boy", "Old", "Section", "General",
+        "Vice", "Senior", "Junior", "Team", "Group", "Head",
+    ]
+)
+
+
+def _looks_like_name_or_title(phrase: str) -> bool:
+    """Skip romanized KR names and 'Manager Kim' style fragments."""
+    words = phrase.split()
+    if not words:
+        return False
+    if _looks_like_korean_name(phrase):
+        return True
+    if len(words) == 2 and words[0] in _JOB_TITLE_PREFIXES:
+        return True
+    if len(words) >= 2 and words[0] in _JOB_TITLE_PREFIXES and all(
+        w[0:1].isupper() for w in words[1:]
+    ):
+        return True
+    if len(words) == 2 and words[1] in _KOREAN_NAME_SYLLABLES:
+        return True
+    return False
+
+
 def _extract_en_fragments(text: str) -> list[str]:
     masked = _mask_brackets(text)
     fragments: list[str] = []
@@ -106,17 +133,117 @@ def _extract_en_fragments(text: str) -> list[str]:
         words = phrase.split()
         if all(w.lower() in _EN_ALLOWLIST for w in words):
             continue
-        if _looks_like_korean_name(phrase):
+        if _looks_like_name_or_title(phrase):
             continue
         fragments.append(phrase)
     for m in _EN_ALLCAPS_RE.finditer(masked):
         phrase = m.group(1)
         if all(w.lower() in _EN_ALLOWLIST for w in phrase.split()):
             continue
-        if _looks_like_korean_name(phrase):
+        if _looks_like_name_or_title(phrase):
             continue
         fragments.append(phrase)
     return list(dict.fromkeys(fragments))  # deduplicate, preserve order
+
+
+def load_chapters_from_db(
+    story_id: str,
+    mode: str = "polished",
+    *,
+    from_chapter: int = 0,
+    to_chapter: int = 0,
+    limit: int | None = None,
+) -> dict[str, str]:
+    """Load chapter text from DB for gap scanning."""
+    from story_db.story_pipeline_db.db import connect
+
+    col = "polished_text_content" if mode == "polished" else "translated_text_content"
+    query = f"""
+        SELECT chapter_number, {col} AS content
+        FROM chapters
+        WHERE story_id = %s AND {col} IS NOT NULL AND length(trim({col})) > 0
+    """
+    params: list[Any] = [story_id]
+    if from_chapter:
+        query += " AND chapter_number >= %s"
+        params.append(from_chapter)
+    if to_chapter:
+        query += " AND chapter_number <= %s"
+        params.append(to_chapter)
+    query += " ORDER BY chapter_number"
+    if limit:
+        query += " LIMIT %s"
+        params.append(limit)
+
+    chapters: dict[str, str] = {}
+    with connect() as conn:
+        for row in conn.execute(query, params).fetchall():
+            num = int(row["chapter_number"])
+            text = str(row["content"] or "").strip()
+            if text:
+                chapters[f"chapter{num:04d}"] = text
+    return chapters
+
+
+def scan_story_gaps_from_db(
+    *,
+    story_id: str,
+    slug: str = "",
+    mode: str = "polished",
+    from_chapter: int = 0,
+    to_chapter: int = 0,
+    story_memory_dir: str = "",
+    char_map_file: str = "",
+    genre: str = "",
+    limit: int | None = None,
+    check_en: bool = True,
+    check_terms: bool = True,
+) -> dict[str, Any]:
+    """Scan DB chapter content for EN fragments and glossary violations."""
+    chapters = load_chapters_from_db(
+        story_id,
+        mode=mode,
+        from_chapter=from_chapter,
+        to_chapter=to_chapter,
+        limit=limit,
+    )
+    en_findings: list[dict[str, Any]] = []
+    if check_en:
+        for chapter_name, text in sorted(chapters.items()):
+            frags = _extract_en_fragments(text)
+            if frags:
+                en_findings.append({"type": "en_fragment", "chapter": chapter_name, "fragments": frags})
+
+    inconsistencies: list[dict[str, Any]] = []
+    mem_dir = story_memory_dir
+    if not mem_dir and slug:
+        mem_root = ROOT / "story_data" / "story_memory"
+        if mem_root.is_dir():
+            for d in mem_root.iterdir():
+                if d.is_dir() and slug in d.name:
+                    mem_dir = str(d)
+                    break
+
+    if check_terms and mem_dir:
+        inconsistencies = _find_inconsistencies(
+            chapters,
+            mem_dir,
+            story_id=story_id,
+            slug=slug,
+            char_map_file=char_map_file,
+            genre=genre,
+        )
+
+    priority_issues = sum(1 for f in inconsistencies if f.get("priority"))
+    return {
+        "chapters_scanned": len(chapters),
+        "en_chapter_count": len(en_findings),
+        "term_issue_count": len(inconsistencies),
+        "priority_term_issues": priority_issues,
+        "should_repolish": bool(en_findings or priority_issues),
+        "en_findings": en_findings,
+        "inconsistencies": inconsistencies,
+    }
 
 
 # ---------------------------------------------------------------------------

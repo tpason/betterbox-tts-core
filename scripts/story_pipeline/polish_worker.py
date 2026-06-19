@@ -55,6 +55,37 @@ def story_slug_for_job(job: dict, input_path: Path) -> str:
     return str(payload.get("story_slug") or input_path.parent.name)
 
 
+def build_metadata_context_for_job(job: dict, args: argparse.Namespace) -> str:
+    payload = job.get("payload") or {}
+    story_id = str(job.get("story_id") or payload.get("story_id") or "")
+    story = repo.get_story_by_id(story_id) if story_id else {}
+    metadata = story.get("metadata") or {}
+    slug = str(payload.get("story_slug") or metadata.get("slug") or "")
+    char_map_file = str(payload.get("char_map_file") or getattr(args, "char_map_file", "") or "")
+
+    from scripts.story_pipeline.translate_chapters_from_db import build_metadata_translation_context
+
+    return build_metadata_translation_context(
+        story_id=story_id,
+        story_slug_value=slug,
+        source_code=str(job.get("source_code") or payload.get("source_code") or ""),
+        story_title=str(story.get("title") or payload.get("source_story_title") or ""),
+        original_title=str(story.get("original_title") or payload.get("source_story_title") or ""),
+        display_title=str(story.get("display_title") or ""),
+        description=str(
+            metadata.get("source_description")
+            or metadata.get("original_description_before_vi_translate")
+            or story.get("description")
+            or payload.get("source_story_description")
+            or ""
+        ),
+        category=str(story.get("category") or metadata.get("genre") or payload.get("genre") or ""),
+        raw_language=str(payload.get("raw_language") or story.get("language") or ""),
+        char_map_file=char_map_file,
+        story_memory_dir=str(getattr(args, "story_memory_dir", "") or ""),
+    )
+
+
 def build_args(
     args: argparse.Namespace,
     model: str,
@@ -81,6 +112,7 @@ def build_args(
         char_map_file=getattr(args, "char_map_file", ""),
         story_memory_dir=getattr(args, "story_memory_dir", ""),
         fail_on_story_memory_issues=getattr(args, "fail_on_story_memory_issues", False),
+        no_chunk_glossary=getattr(args, "no_chunk_glossary", False),
     )
 
 
@@ -98,11 +130,19 @@ def resolve_genre(job: dict, char_map_file: str = "") -> str:
         category = str(story.get("category") or "")
         raw_language = str(payload.get("raw_language") or story.get("language") or "")
         source_code = str(job.get("source_code") or "")
+        metadata = story.get("metadata") or {}
         return resolve_genre_from_context(
             category,
             raw_language=raw_language,
             source_code=source_code,
             char_map_file=char_map_file,
+            title=str(story.get("original_title") or story.get("title") or ""),
+            description=str(
+                metadata.get("source_description")
+                or metadata.get("original_description_before_vi_translate")
+                or story.get("description")
+                or ""
+            ),
         )
     except Exception:
         return ""
@@ -193,7 +233,7 @@ def maybe_auto_update_char_map(
 
     # Seed mode: tạo char-map từ 10 chapter đầu khi --no-batch-char-map bật (hoặc khi tạo lần đầu nhẹ hơn).
     if should_create and no_batch:
-        seed_end = min(10, current_chapter)
+        seed_end = max(1, min(10, current_chapter or 10))
         log(f"[CHAR_MAP] seed create ch1-{seed_end:04d} story_id={story_id} slug={slug} text_source={text_source}")
         cmd = [
             sys.executable,
@@ -645,7 +685,7 @@ def maybe_auto_update_term_glossary(
         updated_to = int(metadata.get("glossary_updated_to_chapter") or 0)
 
         if not g_path.exists():
-            from_chapter, to_chapter = 1, max(10, current_chapter)
+            from_chapter, to_chapter = 1, max(20, current_chapter)
             label = "seed"
         elif current_chapter >= updated_to + interval:
             from_chapter, to_chapter = max(1, updated_to + 1), current_chapter
@@ -914,29 +954,46 @@ def story_metadata_args(args: argparse.Namespace) -> Namespace:
     )
 
 
-def first_content_line(text: str) -> str:
-    for line in (text or "").splitlines():
-        cleaned = re.sub(r"\s+", " ", line).strip()
-        if cleaned:
-            return cleaned
-    return ""
+def maybe_update_translated_chapter_title(
+    job: dict,
+    polished_or_translated_text: str,
+    args: argparse.Namespace | None = None,
+) -> str:
+    """Set chapter title from first polished line (TTS-clean). Matches body terminology."""
+    from scripts.story_pipeline.translate_chapters_from_db import chapter_title_from_content
 
+    overwrite = getattr(args, "overwrite", False)
+    current_title = str(job.get("chapter_title") or "").strip()
+    if current_title and not overwrite:
+        return current_title
 
-_PROSE_SENTENCE_RE = re.compile(r"[!?]\s+\S|[.]\s+[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĐÀ-ỹ]")
+    if getattr(args, "legacy_chapter_title_llm", False):
+        payload = job.get("payload") or {}
+        source_chapter_title = str(payload.get("source_chapter_title") or "").strip()
+        if source_chapter_title and args is not None:
+            try:
+                from scripts.story_pipeline.translate_chapters_from_db import translate_chapter_title
 
+                translated_title = translate_chapter_title(
+                    source_chapter_title,
+                    story_metadata_args(args),
+                    context=build_metadata_context_for_job(job, args),
+                )
+                if translated_title:
+                    repo.update_chapter_title(job["chapter_id"], translated_title)
+                    return translated_title
+            except Exception as exc:  # noqa: BLE001
+                log(f"[TITLE] legacy LLM chapter title failed ({exc}), using first-line")
 
-def maybe_update_translated_chapter_title(job: dict, translated_text_content: str) -> str:
-    title = first_content_line(translated_text_content)
-    if not title or len(title) > 120:
+    title = chapter_title_from_content(polished_or_translated_text)
+    if not title:
         return ""
-    # Dòng đầu chứa nhiều câu văn xuôi → không phải title chapter
-    if _PROSE_SENTENCE_RE.search(title):
-        return ""
+
     repo.update_chapter_title(job["chapter_id"], title)
     return title
 
 
-def maybe_translate_story_metadata(job: dict, args: argparse.Namespace) -> None:
+def maybe_translate_story_metadata(job: dict, args: argparse.Namespace, overwrite: bool = False) -> None:
     payload = job.get("payload") or {}
     if not payload.get("translate_story_metadata") or not job.get("story_id"):
         return
@@ -950,7 +1007,7 @@ def maybe_translate_story_metadata(job: dict, args: argparse.Namespace) -> None:
 
     story = repo.get_story_by_id(job["story_id"])
     metadata = story.get("metadata") or {}
-    if metadata.get("story_metadata_translated_to") == "vi" and story.get("display_title"):
+    if not overwrite and metadata.get("story_metadata_translated_to") == "vi" and story.get("display_title"):
         return
 
     source_title = str(payload.get("source_story_title") or story.get("original_title") or story.get("title") or "").strip()
@@ -958,6 +1015,7 @@ def maybe_translate_story_metadata(job: dict, args: argparse.Namespace) -> None:
     source_description = str(
         payload.get("source_story_description")
         or metadata.get("source_description")
+        or metadata.get("original_description_before_vi_translate")
         or story.get("description")
         or ""
     ).strip()
@@ -965,9 +1023,10 @@ def maybe_translate_story_metadata(job: dict, args: argparse.Namespace) -> None:
         return
 
     meta_args = story_metadata_args(args)
-    display_title = translate_story_title(source_title, meta_args) if source_title and not story.get("display_title") else None
+    metadata_context = build_metadata_context_for_job(job, args)
+    display_title = translate_story_title(source_title, meta_args, context=metadata_context) if source_title and (overwrite or not story.get("display_title")) else None
     author = translate_story_author(source_author, meta_args) if source_author else None
-    description = translate_story_description(source_description, meta_args) if source_description else None
+    description = translate_story_description(source_description, meta_args, context=metadata_context) if source_description else None
 
     update_story_translation(
         job["story_id"],
@@ -1053,8 +1112,6 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             output_path = Path(_tmp_out_dir.name) / output_path.name
             log(f"[WARN] cannot create output dir, using temp: {output_path}")
 
-    maybe_translate_story_metadata(job, args)
-
     # Source text cho completeness check trong quality gate (length ratio /
     # structure drift — warning-only). Strip noise giống translate pass để ratio
     # so trên cùng nội dung thực.
@@ -1076,21 +1133,17 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     current_chapter = int(payload.get("chapter_number") or 0)
     # Pre-resolve genre from DB only (no char_map yet) so auto-create can inject genre header
     pre_genre = resolve_genre(job, char_map_file="")
-    if effective_char_map or char_map_text_source == "raw":
-        effective_char_map = maybe_auto_update_char_map(
-            job,
-            args,
-            slug=job_slug,
-            current_chapter=current_chapter,
-            existing_char_map=effective_char_map,
-            text_source=char_map_text_source,
-            genre=pre_genre,
-        )
-    else:
-        log(
-            "[CHAR_MAP] skip pre-translate seed create: "
-            f"text_source={char_map_text_source} has no DB rows before translation"
-        )
+    # Seed char-map from raw when missing — EN raw_text_content exists right after crawl.
+    char_map_seed_source = "raw" if not effective_char_map else char_map_text_source
+    effective_char_map = maybe_auto_update_char_map(
+        job,
+        args,
+        slug=job_slug,
+        current_chapter=current_chapter,
+        existing_char_map=effective_char_map,
+        text_source=char_map_seed_source,
+        genre=pre_genre,
+    )
     if effective_char_map:
         log(f"[CHAR_MAP] {effective_char_map} (story_id={story_id})")
         try:
@@ -1124,6 +1177,9 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
     maybe_auto_update_term_glossary(
         job, args, slug=job_slug, current_chapter=current_chapter, genre=genre,
     )
+
+    # Story title/description: sau char-map + glossary seed để metadata dùng cùng context.
+    maybe_translate_story_metadata(job, args, overwrite=args.overwrite)
 
     if output_path.exists() and not args.overwrite:
         # Output cũ cũng phải qua quality gate trước khi ghi DB — output hỏng
@@ -1165,8 +1221,8 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 translated_text_content=existing_translated,
                 polished_text_content=existing_polished,
             )
-            if existing_translated:
-                maybe_update_translated_chapter_title(job, existing_translated)
+            if existing_polished:
+                maybe_update_translated_chapter_title(job, existing_polished, args=args)
             # Codex finding 3: nếu recap chưa có (worker crash sau write text nhưng trước recap),
             # backfill từ existing_polished trước khi complete job.
             maybe_update_chapter_recap(
@@ -1218,6 +1274,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
             polished_text_content=polished_text_content,
+            clear_audio=args.overwrite,
         )
     elif args.single_pass and raw_language == "en":
         # Single-pass EN→VI: translate + polish in one Ollama call.
@@ -1249,9 +1306,10 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             job["chapter_id"],
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
             polished_text_content=polished_text_content,
+            clear_audio=args.overwrite,
         )
         # For single-pass, polished output IS the translated output — use it for chapter title and char-map.
-        translated_chapter_title = maybe_update_translated_chapter_title(job, polished_text_content)
+        translated_chapter_title = maybe_update_translated_chapter_title(job, polished_text_content, args=args)
         effective_char_map = maybe_auto_update_char_map(
             job,
             args,
@@ -1302,7 +1360,6 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             source_language=raw_language,
             cleanup_on_fail=(translated_path,),
         )
-        translated_chapter_title = maybe_update_translated_chapter_title(job, translated_text_content)
         effective_char_map = maybe_auto_update_char_map(
             job,
             args,
@@ -1373,7 +1430,9 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
             translated_text_content=translated_text_content,
             polished_text_content=polished_text_content,
+            clear_audio=args.overwrite,
         )
+        translated_chapter_title = maybe_update_translated_chapter_title(job, polished_text_content, args=args)
 
     # Incremental char-map update: extract nhân vật mới từ chapter vừa polished.
     # Chạy sau mỗi chapter để char-map dần dày context cho các chapter tiếp theo.
@@ -1441,6 +1500,12 @@ def main() -> None:
         default=[],
         help="Only claim jobs for this source_code. Repeat for multiple sources.",
     )
+    parser.add_argument(
+        "--story-id",
+        action="append",
+        default=[],
+        help="Only claim jobs for this story id. Repeat for multiple stories.",
+    )
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--idle-sleep", type=float, default=3.0)
     parser.add_argument("--idle-log-interval", type=float, default=30.0, help="Seconds between idle queue logs. Use 0 to disable.")
@@ -1470,6 +1535,16 @@ def main() -> None:
                         help="Model cho LLM judge. Mặc định dùng --translate-model.")
     parser.add_argument("--no-auto-glossary", action="store_true",
                         help="Tắt auto seed/update terminology glossary (story memory).")
+    parser.add_argument(
+        "--no-chunk-glossary",
+        action="store_true",
+        help="Tắt per-chunk glossary supplement trong translate (Phase 2 resolver).",
+    )
+    parser.add_argument(
+        "--legacy-chapter-title-llm",
+        action="store_true",
+        help="Dùng LLM dịch chapter title từ source EN (legacy). Mặc định: lấy dòng đầu polished.",
+    )
     parser.add_argument("--no-chapter-recap", action="store_true",
                         help="Tắt rolling recap (tóm tắt chương trước inject vào prompt chương sau).")
     parser.add_argument("--glossary-update-interval", type=int, default=20,
@@ -1662,7 +1737,11 @@ def main() -> None:
 
     batch_size = args.batch_size or args.workers
     source_label = ",".join(args.source_code) if args.source_code else "all"
-    log(f"worker={args.worker_id}, workers={args.workers}, batch_size={batch_size}, source={source_label}")
+    story_label = ",".join(args.story_id) if args.story_id else "all"
+    log(
+        f"worker={args.worker_id}, workers={args.workers}, batch_size={batch_size}, "
+        f"source={source_label}, story={story_label}"
+    )
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         in_flight: dict[Future[None], str] = {}
@@ -1680,6 +1759,7 @@ def main() -> None:
                     args.worker_id,
                     limit=claim_limit,
                     source_codes=args.source_code,
+                    story_ids=args.story_id,
                 )
                 if args.once:
                     claimed_once = True
@@ -1697,7 +1777,7 @@ def main() -> None:
                 if args.idle_log_interval > 0 and now - last_idle_log >= args.idle_log_interval:
                     log(
                         "[IDLE] no eligible jobs "
-                        f"type=polish_chapter source={source_label} "
+                        f"type=polish_chapter source={source_label} story={story_label} "
                         "waiting for pending jobs with run_after <= now and attempts < max_attempts"
                     )
                     last_idle_log = now

@@ -401,6 +401,7 @@ def process_row(row: dict[str, Any], args: argparse.Namespace, *, index: int, to
             row["chapter_id"],
             polished_text_path=None,
             polished_text_content=polished_content,
+            clear_audio=True,
         )
         elapsed = time.monotonic() - started
         log(f"[DONE] {label} elapsed={elapsed:.1f}s chars={len(polished_content or '')}")
