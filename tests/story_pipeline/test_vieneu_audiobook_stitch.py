@@ -51,21 +51,20 @@ def test_resolve_builtin_voice_when_no_reference_audio():
     assert resolve_vieneu_reference_kwargs(voice="Xuân Vĩnh", reference_audio=None) == {"voice": "Xuân Vĩnh"}
 
 
-def test_default_vieneu_voice_profile_resolves_to_local_reference_audio():
+def test_default_vieneu_voice_profile_resolves_to_builtin_preset():
     kwargs = resolve_vieneu_reference_kwargs(voice_profile=DEFAULT_VIENEU_VOICE_PROFILE)
 
-    assert "ref_audio" in kwargs
-    assert kwargs["ref_audio"].endswith("wavs/vieneu_capybara1812_0048.wav")
-    assert Path(kwargs["ref_audio"]).exists()
-    assert kwargs["ref_text"]
+    assert kwargs == {"voice": "Bình An"}
 
 
 def test_vieneu_voice_profiles_are_unique_and_license_tracked():
     profiles = list_vieneu_voice_profiles()
 
     assert len({profile.key for profile in profiles}) == len(profiles)
-    assert all(profile.source == "pnnbao-ump/VieNeu-TTS-140h" for profile in profiles)
-    assert all(profile.license == "Apache-2.0" for profile in profiles)
+    assert all(profile.source for profile in profiles)
+    assert all(profile.license for profile in profiles)
+    assert any(profile.source == "VieNeu-TTS-v3-Turbo built-in" for profile in profiles)
+    assert any(profile.source == "pnnbao-ump/VieNeu-TTS-140h" for profile in profiles)
 
 
 def test_generate_unit_audio_retries_short_overflow_with_lower_max_new_frames():
@@ -109,3 +108,4 @@ def test_default_vieneu_voice_exists_in_installed_assets():
     voices = json.loads(voices_path.read_text(encoding="utf-8"))["presets"]
 
     assert DEFAULT_VIENEU_VOICE in voices
+    assert "Bình An" in voices

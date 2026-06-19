@@ -30,7 +30,7 @@ Usage:
     --audio-dir story_audio/<slug> \\
     --polished-dir story_data/polished/<slug> \\
     --auto-regen \\
-    --voice-profile xianxia_story_male
+    --voice-profile preset_binh_an
 """
 from __future__ import annotations
 
@@ -259,7 +259,7 @@ def main() -> None:
     parser.add_argument("--max-regen-rounds", type=int, default=3)
     parser.add_argument("--regen-on", default=",".join(sorted(REGEN_TRIGGERS)),
                         help="Comma-separated issue prefixes that trigger regen")
-    parser.add_argument("--voice", default="Xuân Vĩnh")
+    parser.add_argument("--voice", default="Bình An")
     parser.add_argument(
         "--voice-profile",
         default=DEFAULT_VIENEU_VOICE_PROFILE,

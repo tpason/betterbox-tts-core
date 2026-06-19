@@ -22,7 +22,7 @@ from scripts.story_pipeline.viterbox_audiobook_stitch import (
 from scripts.story_pipeline.vieneu_voice_profiles import resolve_vieneu_voice_profile
 
 
-DEFAULT_VIENEU_VOICE = "Xuân Vĩnh"
+DEFAULT_VIENEU_VOICE = "Bình An"
 DEFAULT_MAX_NEW_FRAMES = 300
 
 
@@ -49,6 +49,8 @@ def resolve_vieneu_reference_kwargs(
         return kwargs
     if voice_profile:
         profile = resolve_vieneu_voice_profile(voice_profile)
+        if profile.is_preset:
+            return {"voice": profile.preset_voice}
         return {
             "ref_audio": str(profile.ref_audio_path.resolve()),
             "ref_text": profile.ref_text,
