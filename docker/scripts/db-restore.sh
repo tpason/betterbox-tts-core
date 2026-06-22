@@ -66,11 +66,18 @@ if [ "$MODE" = "physical" ]; then
 else
   DUMP="$BACKUP_DIR/${DB_NAME}.dump"
   [ -f "$DUMP" ] || { echo "ERROR: $DUMP not found." >&2; exit 1; }
-  echo "[restore] LOGICAL rollback from $DUMP (pg_restore --clean)"
+  echo "[restore] LOGICAL rollback from $DUMP (pg_restore --clean, single transaction)"
+  echo "[restore] NOTE: stop all writers (workers/crawlers/reader) before logical restore."
   if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
     docker compose -f "$COMPOSE_FILE" start postgres
+    for i in $(seq 1 30); do
+      docker exec "$CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1 && break
+      sleep 2
+    done
   fi
+  # --single-transaction + --exit-on-error => all-or-nothing; never leaves a half-restored DB.
   docker exec -i "$CONTAINER" pg_restore --clean --if-exists --no-owner \
+    --single-transaction --exit-on-error \
     -U "$DB_USER" -d "$DB_NAME" < "$DUMP"
 fi
 

@@ -57,12 +57,16 @@ echo "[backup] logical dump OK ($((DUMP_BYTES/1000000)) MB, $(wc -l < "$BACKUP_D
 if [ "$DO_PHYSICAL" -eq 1 ]; then
   echo "[backup] stopping Postgres for a consistent cold volume copy..."
   docker compose -f "$COMPOSE_FILE" stop postgres
+  # If the tar (or anything below) fails while Postgres is stopped, make sure we bring it back.
+  restart_pg() { echo "[backup] (trap) ensuring Postgres is started again..."; docker compose -f "$COMPOSE_FILE" start postgres || true; }
+  trap restart_pg EXIT
   TAR="$BACKUP_DIR/pgdata.tar.gz"
   echo "[backup] tarring volume '$VOLUME' -> $TAR"
   docker run --rm -v "${VOLUME}:/data:ro" -v "$(cd "$BACKUP_DIR" && pwd):/backup" alpine \
     tar czf "/backup/pgdata.tar.gz" -C /data .
   echo "[backup] starting Postgres back up..."
   docker compose -f "$COMPOSE_FILE" start postgres
+  trap - EXIT
   # wait for healthy
   for i in $(seq 1 30); do
     if docker exec "$CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then break; fi

@@ -85,25 +85,26 @@ def table_sizes(conn: psycopg.Connection) -> list[dict]:
 
 
 def has_pgstattuple(conn: psycopg.Connection) -> bool:
+    """Detection-only: never CREATE EXTENSION here.
+
+    The report path must stay read-only (no catalog writes before the backup/writers
+    gates). If pgstattuple is not already installed we degrade to size estimates.
+    To enable it, install once out-of-band: CREATE EXTENSION pgstattuple;
+    """
     row = fetch_one(
         conn,
         "SELECT 1 AS ok FROM pg_extension WHERE extname = 'pgstattuple'",
     )
     if row:
         return True
-    # available but not installed? try to create (no-op if no permission)
     avail = fetch_one(
         conn,
         "SELECT 1 AS ok FROM pg_available_extensions WHERE name = 'pgstattuple'",
     )
-    if not avail:
-        return False
-    try:
-        conn.execute("CREATE EXTENSION IF NOT EXISTS pgstattuple")
-        return True
-    except Exception as exc:  # permission, etc.
-        print(f"[bloat] pgstattuple available but cannot CREATE EXTENSION: {exc}")
-        return False
+    if avail:
+        print("[bloat] pgstattuple available but not installed; run 'CREATE EXTENSION pgstattuple' "
+              "to get exact numbers. Using size estimates for now.")
+    return False
 
 
 def print_bloat(conn: psycopg.Connection) -> None:
