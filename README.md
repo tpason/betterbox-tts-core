@@ -26,7 +26,7 @@ Các điểm quan trọng:
 
 - `scripts/story_pipeline/README.md` — hướng dẫn pipeline crawl/translate/polish/audio.
 - `story_db/README.md` — database, schema, discovery/crawl.
-- `docker/env.example` — env vars cho Docker workers.
+- `docker/env.example` — env vars cho Docker workers (gồm `READER_REALTIME_TOKEN`, generate: `bash docker/scripts/generate-reader-realtime-token.sh`).
 - `.agent/PROJECT_CONTEXT.md` — context local cho AI agents, không push lên repo.
 
 ## một số tính năng mới - chung: 

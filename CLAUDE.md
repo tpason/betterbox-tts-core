@@ -100,7 +100,8 @@ docker compose --profile audio up -d    # thêm audio-enqueuer
 | Service | Profile | Mô tả |
 |---|---|---|
 | `story-db-migrate` | (base) | Chạy migrations khi start, tự stop |
-| `story-reader` | (base) | Next.js app tại port 3000 |
+| `story-reader` | (base) | Next.js + WebSocket (`start:ws`) tại port 3000 |
+| `story-admin` | (base) | Admin UI quản lý story/chapter tại port 3001 |
 | `story-discovery-scheduler` | (base) | Discovery truyện hot theo interval (mặc định 24h) |
 | `story-crawler-scheduler` | (base) | Crawl catalog + chapter từ DB, scalable replicas |
 | `story-alternate-scheduler` | (base) | Tìm nguồn phụ cho story thiếu chapter (mặc định dry-run) |
@@ -118,11 +119,17 @@ CRAWLER_REPLICAS=3 docker compose up -d   # 3 replicas crawl song song
 ### Env vars quan trọng
 ```env
 STORY_DATABASE_URL=postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story
-ALTERNATE_APPLY=0          # 1 để thật sự import từ nguồn phụ
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_STORY_READER_URL=http://localhost:3000
+STORY_ADMIN_PORT=3001
 CRAWLER_ONLY_INCOMPLETE=1  # chỉ crawl story chưa complete
 AUDIO_VIENEU_VOICE_PROFILE=preset_binh_an
 AUDIO_SEGMENT_VIENEU_VOICE_KEY=preset_binh_an
 AUDIO_SEGMENT_VIENEU_VOICE_PROFILE=preset_binh_an
+# Realtime reader notifications (generate: bash docker/scripts/generate-reader-realtime-token.sh)
+READER_REALTIME_TOKEN=
+READER_REALTIME_URL=http://story-reader:3000
+NEXT_PUBLIC_READER_WS_URL=
 ```
 
 ---

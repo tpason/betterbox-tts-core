@@ -3,6 +3,8 @@ name: betterbox-tts
 x-pipeline-env: &pipeline-env
   STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
   PYTHONUNBUFFERED: "1"
+  READER_REALTIME_URL: ${READER_REALTIME_URL:-http://story-reader:3000}
+  READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
 
 x-host-gateway: &host-gateway
   - "host.docker.internal:host-gateway"
@@ -43,6 +45,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+        NEXT_PUBLIC_READER_WS_URL: ${NEXT_PUBLIC_READER_WS_URL:-}
     restart: unless-stopped
     depends_on:
       story-db-migrate:
@@ -64,13 +67,71 @@ services:
     extra_hosts: *host-gateway
     logging: *default-logging
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:' + (process.env.PORT || '3000') + '/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:' + (process.env.PORT || '3000') + '/api/health').then(r => r.json()).then(j => process.exit(j.ok && j.websocket ? 0 : 1)).catch(() => process.exit(1))"
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
     ports:
       - "${STORY_READER_PORT:-3000}:${STORY_READER_PORT:-3000}"
+
+  story-admin:
+    build:
+      context: story_admin
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_STORY_READER_URL: ${NEXT_PUBLIC_STORY_READER_URL:-http://localhost:3000}
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    environment:
+      STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
+      PORT: ${STORY_ADMIN_PORT:-3001}
+      HOSTNAME: 0.0.0.0
+      NODE_ENV: production
+      NEXT_PUBLIC_STORY_READER_URL: ${NEXT_PUBLIC_STORY_READER_URL:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      STORY_PIPELINE_ROOT: ${STORY_PIPELINE_ROOT:-/repo}
+      STORY_PIPELINE_PYTHON: ${STORY_PIPELINE_PYTHON:-}
+      STORY_PIPELINE_DOCKER: ${STORY_PIPELINE_DOCKER:-0}
+      STORY_PIPELINE_DOCKER_SERVICE: ${STORY_PIPELINE_DOCKER_SERVICE:-story-pipeline-cli}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+    volumes:
+      - .:/repo:ro
+    extra_hosts: *host-gateway
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:' + (process.env.PORT || '3001') + '/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "${STORY_ADMIN_PORT:-3001}:${STORY_ADMIN_PORT:-3001}"
+
+  # One-shot pipeline CLI for story-admin (profile tools). Example:
+  #   docker compose --profile tools run --rm story-pipeline-cli repolish --story-id ... --chapter-numbers 1
+  story-pipeline-cli:
+    profiles: [tools]
+    build:
+      context: .
+      dockerfile: docker/story-pipeline.Dockerfile
+    environment:
+      <<: *pipeline-env
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts: *host-gateway
+    volumes:
+      - .:/app
+    working_dir: /app
+    entrypoint: ["python", "scripts/story_pipeline/admin_pipeline_cli.py"]
 
   story-discovery-scheduler:
     build:
@@ -181,7 +242,9 @@ services:
     healthcheck: *db-healthcheck
     command: ["sh", "docker/scripts/run-alternate-scheduler.sh"]
 
+  # LLM-heavy (gọi ollama). KHÔNG auto-start; chạy thủ công: docker compose --profile ai up -d
   char-map-updater:
+    profiles: ["ai"]
     build:
       context: .
       dockerfile: docker/story-pipeline.Dockerfile
@@ -250,7 +313,9 @@ services:
               count: 1
               capabilities: [gpu]
 
+  # LLM-heavy (gọi ollama). KHÔNG auto-start; chạy thủ công: docker compose --profile ai up -d
   polish-worker:
+    profiles: ["ai"]
     build:
       context: .
       dockerfile: docker/story-pipeline.Dockerfile
