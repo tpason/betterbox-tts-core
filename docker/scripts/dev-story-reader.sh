@@ -54,6 +54,7 @@ fi
 export NEXT_PUBLIC_ENABLE_PWA="${NEXT_PUBLIC_ENABLE_PWA:-1}"
 
 PORT="${STORY_READER_DEV_PORT:-$PORT}"
+export PORT
 export READER_BIND_HOST="0.0.0.0"
 export NODE_ENV=development
 export STORY_DATABASE_URL="${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@127.0.0.1:54329/betterbox_story}"
