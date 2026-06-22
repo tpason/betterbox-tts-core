@@ -4,6 +4,7 @@ x-pipeline-env: &pipeline-env
   STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
   PYTHONUNBUFFERED: "1"
   READER_REALTIME_URL: ${READER_REALTIME_URL:-http://story-reader:3000}
+  READER_REALTIME_DEV_URL: ${READER_REALTIME_DEV_URL:-}
   READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
 
 x-host-gateway: &host-gateway
@@ -53,7 +54,7 @@ services:
     environment:
       STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
       PORT: ${STORY_READER_PORT:-3000}
-      HOSTNAME: 0.0.0.0
+      READER_BIND_HOST: 0.0.0.0
       NODE_ENV: production
       READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
       NEXT_PUBLIC_READER_WS_URL: ${NEXT_PUBLIC_READER_WS_URL:-}
@@ -80,6 +81,47 @@ services:
       start_period: 20s
     ports:
       - "${STORY_READER_PORT:-3000}:${STORY_READER_PORT:-3000}"
+
+  # Hot-reload UI dev — no image rebuild. Use instead of story-reader while editing frontend.
+  #   docker compose stop story-reader
+  #   docker compose --profile dev up -d story-reader-dev
+  #   open http://127.0.0.1:3003
+  story-reader-dev:
+    profiles: ["dev"]
+    image: node:22-alpine
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      story-db-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./story_reader:/app
+      - story_reader_dev_node_modules:/app/node_modules
+    command: >
+      sh -c "if [ ! -d node_modules/next ]; then npm ci; fi && npm run dev:ws"
+    environment:
+      STORY_DATABASE_URL: ${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@host.docker.internal:54329/betterbox_story}
+      PORT: ${STORY_READER_DEV_PORT:-3003}
+      READER_BIND_HOST: 0.0.0.0
+      NODE_ENV: development
+      READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
+      NEXT_PUBLIC_READER_WS_URL: ${NEXT_PUBLIC_READER_WS_URL:-}
+    extra_hosts: *host-gateway
+    logging: *default-logging
+    ports:
+      - "${STORY_READER_DEV_PORT:-3003}:${STORY_READER_DEV_PORT:-3003}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:' + (process.env.PORT || '3003') + '/api/health').then(r => r.json()).then(j => process.exit(j.ok && j.websocket ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
 
   story-admin:
     build:
@@ -430,3 +472,4 @@ volumes:
   betterbox_torch_cache:
   betterbox_hf_cache:
   betterbox_ollama_data:
+  story_reader_dev_node_modules:

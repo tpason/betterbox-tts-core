@@ -12,7 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 def _reader_realtime_config() -> tuple[str, str]:
-    base = (os.getenv("READER_REALTIME_URL") or "").strip().rstrip("/")
+    # READER_REALTIME_DEV_URL overrides production URL while developing UI on host :3003.
+    base = (
+        os.getenv("READER_REALTIME_DEV_URL")
+        or os.getenv("READER_REALTIME_URL")
+        or ""
+    ).strip().rstrip("/")
     token = (os.getenv("READER_REALTIME_TOKEN") or "").strip()
     return base, token
 

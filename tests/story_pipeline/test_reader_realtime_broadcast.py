@@ -11,7 +11,23 @@ from scripts.story_pipeline.reader_realtime_broadcast import (
 
 def test_broadcast_skips_when_url_unset(monkeypatch):
     monkeypatch.delenv("READER_REALTIME_URL", raising=False)
+    monkeypatch.delenv("READER_REALTIME_DEV_URL", raising=False)
     assert broadcast_reader_event(story_id="1") is False
+
+
+def test_broadcast_prefers_dev_url(monkeypatch):
+    monkeypatch.setenv("READER_REALTIME_URL", "http://story-reader:3000")
+    monkeypatch.setenv("READER_REALTIME_DEV_URL", "http://host.docker.internal:3003")
+    monkeypatch.setenv("READER_REALTIME_TOKEN", "secret")
+
+    response = MagicMock()
+    response.ok = True
+    mock_post = MagicMock(return_value=response)
+
+    with patch("scripts.story_pipeline.reader_realtime_broadcast.requests.post", mock_post):
+        assert broadcast_reader_event(story_id="1") is True
+
+    assert mock_post.call_args[0][0] == "http://host.docker.internal:3003/api/realtime/broadcast"
 
 
 def test_broadcast_posts_with_token(monkeypatch):

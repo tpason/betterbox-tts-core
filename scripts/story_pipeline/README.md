@@ -832,11 +832,13 @@ bash docker/scripts/generate-reader-realtime-token.sh
 ```env
 READER_REALTIME_TOKEN=<token>
 READER_REALTIME_URL=http://story-reader:3000
+# Dev UI trên host :3003 (workers ưu tiên DEV URL khi set):
+# READER_REALTIME_DEV_URL=http://host.docker.internal:3003
 ```
 
-3. Docker `story-reader` phải chạy `start:ws` (mặc định trong `Dockerfile`).
+3. Docker `story-reader` phải chạy `start:ws` (mặc định trong `Dockerfile`). Dev UI không rebuild: `bash docker/scripts/dev-story-reader.sh` hoặc `make reader-dev`.
 
-`crawl_stories_from_db.py` và `polish_worker.py` gọi `scripts/story_pipeline/reader_realtime_broadcast.py` tự động khi env có `READER_REALTIME_URL`. Broadcast thất bại không làm fail job crawl/polish.
+`crawl_stories_from_db.py` và `polish_worker.py` gọi `scripts/story_pipeline/reader_realtime_broadcast.py` tự động khi env có `READER_REALTIME_URL` hoặc `READER_REALTIME_DEV_URL`. Broadcast thất bại không làm fail job crawl/polish.
 
 Kiểm tra:
 
