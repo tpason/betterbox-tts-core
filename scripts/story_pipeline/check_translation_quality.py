@@ -608,6 +608,46 @@ def scan_story(
     return results
 
 
+def list_chapters_for_pipeline_reset(
+    story_id: str,
+    *,
+    from_chapter: int = 0,
+    to_chapter: int = 0,
+    chapter_numbers: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Rows compatible with retranslate_bad_chapters / reset_polished_for_repolish."""
+    query = """
+        SELECT
+            c.id AS chapter_id,
+            c.chapter_number,
+            c.title AS chapter_title,
+            c.raw_language,
+            c.raw_text_path,
+            c.polished_text_path,
+            c.story_id,
+            s.title AS story_title,
+            src.code AS source_code
+        FROM chapters c
+        JOIN stories s ON s.id = c.story_id
+        JOIN sources src ON src.id = s.source_id
+        WHERE c.story_id = %(story_id)s
+    """
+    params: dict[str, Any] = {"story_id": story_id}
+    if chapter_numbers:
+        query += " AND c.chapter_number = ANY(%(chapter_numbers)s::int[])"
+        params["chapter_numbers"] = chapter_numbers
+    else:
+        if from_chapter:
+            query += " AND c.chapter_number >= %(from_chapter)s"
+            params["from_chapter"] = from_chapter
+        if to_chapter:
+            query += " AND c.chapter_number <= %(to_chapter)s"
+            params["to_chapter"] = to_chapter
+    query += " ORDER BY c.chapter_number"
+    with connect() as conn:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
 def reset_polished_for_repolish(
     chapter_ids: list[str], dry_run: bool = True, force_running: bool = False
 ) -> int:

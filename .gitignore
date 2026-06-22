@@ -29,6 +29,9 @@ out/
 # Split repository: story_reader is pushed as its own repo.
 /story_reader/
 
+# Split repository: story_admin is pushed as its own repo.
+/story_admin/
+
 # IDE/editor settings
 .vscode/
 .DS_Store
@@ -130,3 +133,4 @@ out/
 # Video background sub-project generated outputs
 /video_background/outputs/
 /video_background/.env
+/video_background

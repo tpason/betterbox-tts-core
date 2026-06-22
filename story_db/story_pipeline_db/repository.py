@@ -1737,3 +1737,67 @@ def enqueue_audio_segments_for_chapter(
         "unchanged": unchanged,
         "job": dict(job_row),
     }
+
+
+def request_story_recrawl(story_id: str) -> dict[str, Any] | None:
+    """Reset catalog check timestamps so crawl scheduler picks up the story again."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            UPDATE stories
+            SET last_catalog_checked_at = NULL,
+                metadata = (
+                    COALESCE(metadata, '{}'::jsonb)
+                    - 'last_crawl_finished_at'
+                    - 'crawl_claimed_by'
+                    - 'crawl_claimed_at'
+                    - 'crawl_claimed_until'
+                ) || jsonb_build_object('admin_recrawl_requested_at', now()),
+                updated_at = now()
+            WHERE id = %s
+            RETURNING id, title
+            """,
+            (story_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+
+def request_chapter_recrawl(
+    story_id: str,
+    *,
+    chapter_numbers: list[int] | None = None,
+    from_chapter: int = 0,
+    to_chapter: int = 0,
+    clear_raw: bool = False,
+    touch_story_catalog: bool = True,
+) -> int:
+    """Mark chapters for re-download on next crawl pass."""
+    conditions = ["story_id = %(story_id)s"]
+    params: dict[str, Any] = {"story_id": story_id, "clear_raw": clear_raw}
+    if chapter_numbers:
+        conditions.append("chapter_number = ANY(%(chapter_numbers)s::int[])")
+        params["chapter_numbers"] = chapter_numbers
+    else:
+        if from_chapter:
+            conditions.append("chapter_number >= %(from_chapter)s")
+            params["from_chapter"] = from_chapter
+        if to_chapter:
+            conditions.append("chapter_number <= %(to_chapter)s")
+            params["to_chapter"] = to_chapter
+
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            UPDATE chapters
+            SET is_downloaded = FALSE,
+                raw_text_content = CASE WHEN %(clear_raw)s THEN NULL ELSE raw_text_content END,
+                updated_at = now()
+            WHERE {' AND '.join(conditions)}
+            RETURNING id
+            """,
+            params,
+        ).fetchall()
+
+    if touch_story_catalog:
+        request_story_recrawl(story_id)
+    return len(rows)
