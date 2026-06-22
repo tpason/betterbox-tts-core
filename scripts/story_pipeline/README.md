@@ -817,6 +817,43 @@ Với ảnh lấy từ nguồn ngoài, script lưu thêm `cover_backfill_method`
 10. Merge `--number 5` để kiểm tra.
 11. Merge toàn bộ.
 
+## Reader realtime broadcast
+
+Sau khi crawl hoặc polish chapter, pipeline có thể push thông báo live tới Story Reader qua WebSocket.
+
+1. Generate token (một lần):
+
+```bash
+bash docker/scripts/generate-reader-realtime-token.sh
+```
+
+2. Thêm vào root `.env`:
+
+```env
+READER_REALTIME_TOKEN=<token>
+READER_REALTIME_URL=http://story-reader:3000
+```
+
+3. Docker `story-reader` phải chạy `start:ws` (mặc định trong `Dockerfile`).
+
+`crawl_stories_from_db.py` và `polish_worker.py` gọi `scripts/story_pipeline/reader_realtime_broadcast.py` tự động khi env có `READER_REALTIME_URL`. Broadcast thất bại không làm fail job crawl/polish.
+
+Kiểm tra:
+
+```bash
+curl http://localhost:3000/api/health
+bash docker/scripts/smoke-reader-realtime.sh
+curl -X POST http://localhost:3000/api/realtime/broadcast \
+  -H "Authorization: Bearer $READER_REALTIME_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"notification_update"}'
+
+# Hoặc qua Python CLI:
+READER_REALTIME_URL=http://localhost:3000 READER_REALTIME_TOKEN=$READER_REALTIME_TOKEN \
+  viterbox/venv/bin/python scripts/story_pipeline/reader_realtime_broadcast.py \
+  --type chapter_update --story-id <uuid> --chapter-number 128
+```
+
 ## Lưu ý
 
 - Script crawl hiện tối ưu cho cấu trúc `wattpad.com.vn`, cụ thể selector `#chapter-list` và `#vungdoc > div.truyen`.

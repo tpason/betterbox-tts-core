@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 from story_db.story_pipeline_db import repository as repo
+from scripts.story_pipeline.reader_realtime_broadcast import broadcast_chapter_update
 from genre_prompts import (
     clean_source_noise,
     detect_genre,
@@ -1466,6 +1467,9 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             **({"single_pass": True} if args.single_pass and raw_language == "en" else {}),
         },
     )
+    polished_text_content = locals().get("polished_text_content") or ""
+    if polished_text_content and story_id and current_chapter > 0:
+        broadcast_chapter_update(story_id=story_id, chapter_number=current_chapter)
     log(f"[DONE] {job['id']} -> {output_path}")
 
     if input_is_temp:

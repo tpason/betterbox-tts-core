@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from story_db.story_pipeline_db import repository as repo
+from scripts.story_pipeline.reader_realtime_broadcast import broadcast_chapter_update
 from scripts.story_pipeline.genre_prompts import detect_genre, find_char_map_file, resolve_genre_from_context
 from scripts.story_pipeline.crawl_hako_chapters import crawl_catalog as crawl_hako_catalog
 from scripts.story_pipeline.crawl_lightnovelpub_chapters import (
@@ -438,7 +439,7 @@ def upsert_downloaded_chapter(
     lock_reason: str | None = None,
 ) -> dict[str, Any]:
     title_fallback = f"chapter{chapter_number:04d}"
-    return repo.upsert_chapter(
+    db_chapter = repo.upsert_chapter(
         story["id"],
         {
             "source_chapter_id": source_chapter_id,
@@ -454,6 +455,9 @@ def upsert_downloaded_chapter(
             "is_downloaded": bool(raw_text_content),
         },
     )
+    if raw_text_content and story.get("id"):
+        broadcast_chapter_update(story_id=str(story["id"]), chapter_number=chapter_number)
+    return db_chapter
 
 
 def write_if_needed(path: Path, text: str, overwrite: bool, persist: bool = True) -> bool:
