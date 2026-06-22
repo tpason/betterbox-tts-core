@@ -106,7 +106,8 @@ def _score_preset(profile: VieneuVoiceProfile) -> tuple[float, str]:
 def _profile_audio_dir(profile: VieneuVoiceProfile) -> Path | None:
     if profile.ref_audio:
         path = profile.ref_audio_path
-        if "voice_bank/vieneu" in path.as_posix():
+        posix = path.as_posix()
+        if "voice_bank/vieneu" in posix or "voice_bank/phoaudiobook" in posix:
             return path.parent
     return None
 

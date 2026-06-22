@@ -331,6 +331,55 @@ VIENEU_VOICE_PROFILES: dict[str, VieneuVoiceProfile] = {
         tags=("xianxia", "female", "wise", "elder", "narrator"),
         notes="Wise elder female — hợp nhân vật nữ tu sĩ hoặc narrator nữ xianxia.",
     ),
+    # ── PhoAudiobook (thivux/phoaudiobook) — sachnoiviet.net narration ─────────
+    "phoaudiobook_lu_thu": VieneuVoiceProfile(
+        key="phoaudiobook_lu_thu",
+        label="PhoAudiobook Lữ Thứ — kể chuyện hắn/nàng",
+        speaker="Lữ_Thứ",
+        gender="male",
+        ref_audio="voice_bank/phoaudiobook/lữ_thứ/vieneu_lữ_thứ_0001.wav",
+        ref_text=(
+            "như những lần hắn gặp trước ở trại quy nhơn, đôi mắt nhìn hắn thương xót "
+            "và đau đớn như chính nàng đang bị hành hạ. khuôn mặt ấy đã chết hẳn nụ cười."
+        ),
+        source="thivux/phoaudiobook",
+        license="unknown",
+        tags=("xianxia", "male", "narrator", "phoaudiobook", "clone"),
+        notes=(
+            "Top PhoAudiobook survey pick: avg_quality 9.19, 370 narrative hits. "
+            "Full bank: voice_bank/phoaudiobook/lữ_thứ/ (~25 min, 131 clips)."
+        ),
+    ),
+    "phoaudiobook_le_quyen": VieneuVoiceProfile(
+        key="phoaudiobook_le_quyen",
+        label="PhoAudiobook Lệ Quyên — cung đình trang nghiêm",
+        speaker="Lệ_Quyên",
+        gender="female",
+        ref_audio="voice_bank/phoaudiobook/lệ_quyên/vieneu_lệ_quyên_0000.wav",
+        ref_text=(
+            "đã lâu bệ hạ không đến tây cung, khiến cho thần thiếp vô cùng lo lắng. "
+            "chẳng hay việc quân quốc đại sự bận rộn lắm sao?"
+        ),
+        source="thivux/phoaudiobook",
+        license="unknown",
+        tags=("xianxia", "female", "imperial", "narrator", "phoaudiobook", "clone"),
+        notes=(
+            "Highest avg_quality (9.38) in PhoAudiobook survey; cung đình/bệ hạ prose. "
+            "Export with: download_vieneu_voice_bank.py --dataset phoaudiobook --speaker Lệ_Quyên"
+        ),
+    ),
+    "phoaudiobook_bach_diep": VieneuVoiceProfile(
+        key="phoaudiobook_bach_diep",
+        label="PhoAudiobook Bách Diệp — kể chuyện căng thẳng",
+        speaker="Bách_Diệp",
+        gender="male",
+        ref_audio="voice_bank/phoaudiobook/bách_diệp/vieneu_bách_diệp_0000.wav",
+        ref_text="máy quay đều rõ ràng. hơn nữa; hắn muốn giết ai; muốn giết lúc nào đều có thể đạt thành mục tiêu.",
+        source="thivux/phoaudiobook",
+        license="unknown",
+        tags=("xianxia", "male", "thriller", "narrator", "phoaudiobook", "clone"),
+        notes="Large usable bank (~207 min); strong hắn-in-prose hits. Export on demand.",
+    ),
     # ── VieNeu-TTS-140h voice bank — unregistered speakers ──────────────────────
     "vieneu_capybara1812_0027": VieneuVoiceProfile(
         key="vieneu_capybara1812_0027",
