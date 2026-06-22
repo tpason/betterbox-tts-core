@@ -134,3 +134,6 @@ out/
 /video_background/outputs/
 /video_background/.env
 /video_background
+
+# DB backups (pg_dump / cold volume tars from db-backup.sh)
+/db_backups/
