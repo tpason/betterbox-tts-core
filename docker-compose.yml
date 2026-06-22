@@ -58,6 +58,10 @@ services:
       NODE_ENV: production
       READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
       NEXT_PUBLIC_READER_WS_URL: ${NEXT_PUBLIC_READER_WS_URL:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      PUSH_SEND_SECRET: ${PUSH_SEND_SECRET:-}
       AUDIO_API_BLOCKING_JOB_TYPES: ${AUDIO_API_BLOCKING_JOB_TYPES:-audio_chapter_segments,audio_chapter,polish_chapter}
       AUDIO_API_MAX_RUNNING_JOBS: ${AUDIO_API_MAX_RUNNING_JOBS:-1}
       AUDIO_API_MAX_QUEUED_JOBS: ${AUDIO_API_MAX_QUEUED_JOBS:-1}
@@ -106,6 +110,10 @@ services:
       NODE_ENV: development
       READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
       NEXT_PUBLIC_READER_WS_URL: ${NEXT_PUBLIC_READER_WS_URL:-}
+      NEXT_PUBLIC_ENABLE_PWA: ${NEXT_PUBLIC_ENABLE_PWA:-1}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
     extra_hosts: *host-gateway
     logging: *default-logging
     ports:
@@ -142,12 +150,13 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-}
       STORY_PIPELINE_ROOT: ${STORY_PIPELINE_ROOT:-/repo}
       STORY_PIPELINE_PYTHON: ${STORY_PIPELINE_PYTHON:-}
-      STORY_PIPELINE_DOCKER: ${STORY_PIPELINE_DOCKER:-0}
+      STORY_PIPELINE_DOCKER: ${STORY_PIPELINE_DOCKER:-1}
       STORY_PIPELINE_DOCKER_SERVICE: ${STORY_PIPELINE_DOCKER_SERVICE:-story-pipeline-cli}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
     volumes:
       - .:/repo:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts: *host-gateway
     logging: *default-logging
     healthcheck:

@@ -45,11 +45,15 @@ if [[ -f "$ROOT/.env" ]]; then
   load_env_key READER_REALTIME_URL "$ROOT/.env"
   load_env_key READER_REALTIME_DEV_URL "$ROOT/.env"
   load_env_key STORY_READER_DEV_PORT "$ROOT/.env"
+  load_env_key VAPID_PUBLIC_KEY "$ROOT/.env"
+  load_env_key VAPID_PRIVATE_KEY "$ROOT/.env"
+  load_env_key VAPID_SUBJECT "$ROOT/.env"
+  load_env_key NEXT_PUBLIC_ENABLE_PWA "$ROOT/.env"
 fi
 
-PORT="${STORY_READER_DEV_PORT:-$PORT}"
+export NEXT_PUBLIC_ENABLE_PWA="${NEXT_PUBLIC_ENABLE_PWA:-1}"
 
-export PORT
+PORT="${STORY_READER_DEV_PORT:-$PORT}"
 export READER_BIND_HOST="0.0.0.0"
 export NODE_ENV=development
 export STORY_DATABASE_URL="${STORY_DATABASE_URL:-postgresql://betterbox:betterbox@127.0.0.1:54329/betterbox_story}"
