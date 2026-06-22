@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import os
 import socket
 import subprocess
 import sys
@@ -89,16 +90,36 @@ def read_mem_free_gb() -> float:
     return mem.get("MemAvailable", mem.get("MemFree", 0)) / (1024 * 1024)
 
 
+def read_vram_free_gb() -> float:
+    try:
+        from resource_guard import read_vram_free_mb
+
+        mb = read_vram_free_mb()
+        return mb / 1024.0 if mb >= 0 else -1.0
+    except Exception:
+        return -1.0
+
+
 def wait_for_system_capacity(args: argparse.Namespace) -> None:
     while True:
         cpu_percent = read_cpu_percent(args.cpu_measure_seconds)
         mem_free_gb = read_mem_free_gb()
-        if cpu_percent <= args.max_cpu_percent and mem_free_gb >= args.min_free_ram_gb:
+        vram_free_gb = read_vram_free_gb()
+        vram_ok = (
+            args.min_free_vram_gb <= 0
+            or (vram_free_gb >= 0 and vram_free_gb >= args.min_free_vram_gb)
+        )
+        if cpu_percent <= args.max_cpu_percent and mem_free_gb >= args.min_free_ram_gb and vram_ok:
             return
+        vram_note = (
+            f"vram_free={vram_free_gb:.2f}GB required={args.min_free_vram_gb:.2f}GB"
+            if args.min_free_vram_gb > 0
+            else "vram=skip"
+        )
         print(
             f"[RESOURCES] cpu={cpu_percent:.1f}% max={args.max_cpu_percent:.1f}% "
             f"mem_free={mem_free_gb:.2f}GB required={args.min_free_ram_gb:.2f}GB, "
-            f"sleep {args.resource_wait_seconds:.0f}s",
+            f"{vram_note}, sleep {args.resource_wait_seconds:.0f}s",
             flush=True,
         )
         time.sleep(args.resource_wait_seconds)
@@ -353,6 +374,12 @@ def main() -> None:
     parser.add_argument("--hf-token", default=None)
     parser.add_argument("--gpu-lock-path", default="/tmp/betterbox_tts_gpu.lock")
     parser.add_argument("--min-free-ram-gb", type=float, default=1.5)
+    parser.add_argument(
+        "--min-free-vram-gb",
+        type=float,
+        default=float(os.environ.get("AUDIO_SEGMENT_VIENEU_MIN_FREE_VRAM_GB", "6")),
+        help="Wait until at least this much VRAM is free (0=disable). Default 6GB.",
+    )
     parser.add_argument("--max-cpu-percent", type=float, default=90.0)
     parser.add_argument("--cpu-measure-seconds", type=float, default=0.5)
     parser.add_argument("--resource-wait-seconds", type=float, default=10.0)

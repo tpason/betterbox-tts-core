@@ -42,6 +42,18 @@ class ResourceGuardTest(unittest.TestCase):
         ok, _ = check_safe(snap, ResourceThresholds.qa_deterministic(), require_gpu=False)
         self.assertTrue(ok)
 
+    def test_tts_vieneu_blocks_low_vram(self) -> None:
+        snap = ResourceSnapshot(cpu_percent=40.0, ram_free_mb=8000, vram_free_mb=3000)
+        ok, reasons = check_safe(snap, ResourceThresholds.tts_vieneu())
+        self.assertFalse(ok)
+        self.assertTrue(any("VRAM" in r for r in reasons))
+
+    def test_tts_cpu_blocks_high_cpu(self) -> None:
+        snap = ResourceSnapshot(cpu_percent=80.0, ram_free_mb=16000, vram_free_mb=-1)
+        ok, reasons = check_safe(snap, ResourceThresholds.tts_cpu(), require_gpu=False)
+        self.assertFalse(ok)
+        self.assertTrue(any("CPU" in r for r in reasons))
+
     @patch("resource_guard.time.sleep", return_value=None)
     @patch("resource_guard.snapshot")
     def test_wait_until_safe_returns_when_ok(self, mock_snap, _sleep) -> None:
@@ -53,6 +65,7 @@ class ResourceGuardTest(unittest.TestCase):
             poll_seconds=1,
             max_wait_seconds=5,
             wait_for_workers=False,
+            wait_for_ollama_users=False,
             require_gpu=False,
             log=lambda _m: None,
         )
