@@ -49,6 +49,12 @@ from story_memory import (
 )
 from extract_term_glossary import glossary_path_for, update_term_glossary
 from llm_quality_judge import judge_chapter_quality
+from chapter_save_guard import SaveGateError, commit_guarded_chapter_outputs
+from novel_translation_adapter import (
+    load_char_map_raw,
+    resolve_translation_engine,
+    run_novel_translation_for_job,
+)
 
 
 def story_slug_for_job(job: dict, input_path: Path) -> str:
@@ -807,6 +813,50 @@ class QualityGateError(RuntimeError):
     """
 
 
+def _save_chapter_to_db(
+    job: dict,
+    args: argparse.Namespace,
+    *,
+    polished_text: str,
+    translated_text: str | None = None,
+    polished_text_path: str | None = None,
+    translated_text_path: str | None = None,
+    clear_audio: bool = False,
+    gate_source_text: str = "",
+    genre: str = "",
+    story_id: str = "",
+    slug: str = "",
+    char_map: str = "",
+    raw_language: str = "",
+    pipeline_result=None,
+    novel_engine: bool = False,
+) -> None:
+    try:
+        commit_guarded_chapter_outputs(
+            job["chapter_id"],
+            polished_text=polished_text,
+            translated_text=translated_text,
+            polished_text_path=polished_text_path,
+            translated_text_path=translated_text_path,
+            clear_audio=clear_audio,
+            verify_kwargs={
+                "source_text": gate_source_text,
+                "genre": genre,
+                "story_id": story_id,
+                "slug": slug,
+                "char_map": char_map,
+                "source_language": raw_language,
+                "story_memory_dir": str(getattr(args, "story_memory_dir", "") or ""),
+                "pipeline_result": pipeline_result,
+                "args": args,
+                "novel_engine": novel_engine,
+                "translated_text": translated_text or "",
+            },
+        )
+    except SaveGateError as exc:
+        raise QualityGateError(f"save_gate: {', '.join(exc.blocking)}") from exc
+
+
 def _fix_pronouns_for_genre(text: str, genre: str, output_path: Path | None) -> str:
     """Deterministic post-fix: hắn→anh ta, nàng→cô ấy... cho genre cấm đại từ cổ phong.
 
@@ -1089,20 +1139,25 @@ def _resolve_input_for_polish(job: dict) -> tuple[Path, bool]:
 
     payload = job.get("payload") or {}
 
-    # Post-translate queue jobs: raw_language=vi AND translated_text_path present in payload.
-    # Native VI jobs: raw_language=vi but no translated_text_path (or raw_language=en/zh).
-    # Only use translated_text_content for the post-translate case to avoid polishing
-    # untranslated source text.
+    repair_action = str(payload.get("repair_action") or "").strip().lower()
     raw_language = (payload.get("raw_language") or "vi").lower()
-    is_post_translate = raw_language == "vi" and bool(
-        payload.get("is_post_translate") or payload.get("translated_text_path")
-    )
-    if is_post_translate:
+
+    if repair_action == "repolish":
         content = repo.get_chapter_translated_content(job["chapter_id"])
         content_label = "translated_text_content"
-    else:
+    elif repair_action == "retranslate":
         content = repo.get_chapter_raw_content(job["chapter_id"])
         content_label = "raw_text_content"
+    else:
+        is_post_translate = raw_language == "vi" and bool(
+            payload.get("is_post_translate") or payload.get("translated_text_path")
+        )
+        if is_post_translate:
+            content = repo.get_chapter_translated_content(job["chapter_id"])
+            content_label = "translated_text_content"
+        else:
+            content = repo.get_chapter_raw_content(job["chapter_id"])
+            content_label = "raw_text_content"
 
     if not content:
         raise FileNotFoundError(
@@ -1122,9 +1177,12 @@ def _resolve_input_for_polish(job: dict) -> tuple[Path, bool]:
 
 def process_job(job: dict, args: argparse.Namespace) -> None:
     payload = job.get("payload") or {}
+    repair_action = str(payload.get("repair_action") or "").strip().lower()
     repair_hints = str(payload.get("repair_hints") or "").strip()
     if repair_hints:
         args.chapter_repair_hints = repair_hints
+    if repair_action:
+        log(f"[REPAIR] action={repair_action} quality_repair={bool(payload.get('quality_repair'))}")
     raw_language = (payload.get("raw_language") or "vi").lower()
     input_path, input_is_temp = _resolve_input_for_polish(job)
     raw_output_path = job.get("output_path") or ""
@@ -1246,12 +1304,19 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
                 if translated_path and Path(translated_path).exists()
                 else None
             )
-            repo.update_chapter_text_outputs(
-                job["chapter_id"],
-                translated_text_path=translated_path,
+            _save_chapter_to_db(
+                job,
+                args,
+                polished_text=existing_polished,
+                translated_text=existing_translated,
                 polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
-                translated_text_content=existing_translated,
-                polished_text_content=existing_polished,
+                translated_text_path=translated_path,
+                gate_source_text=gate_source_text,
+                genre=genre,
+                story_id=story_id,
+                slug=job_slug,
+                char_map=effective_char_map or "",
+                raw_language=raw_language,
             )
             if existing_polished:
                 maybe_update_translated_chapter_title(job, existing_polished, args=args)
@@ -1279,7 +1344,44 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         ns.current_chapter = 0 if getattr(args, "no_chapter_recap", False) else current_chapter
         return ns
 
-    if raw_language == "vi":
+    translation_engine = resolve_translation_engine(args, raw_language)
+
+    if translation_engine == "novel" and raw_language == "en" and repair_action != "repolish":
+        _check_resources(args, label="novel-translate")
+        pipeline_result = run_novel_translation_for_job(
+            job,
+            args,
+            source_text=gate_source_text,
+            genre=genre,
+            slug=job_slug,
+            char_map_raw=load_char_map_raw(story_id),
+            chapter_number=current_chapter,
+        )
+        if not pipeline_result.success:
+            detail = pipeline_result.error or ", ".join(pipeline_result.final_quality_blocking[:5])
+            raise QualityGateError(f"novel pipeline: {detail}")
+        polished_text_content = clean_for_audiobook_tts(pipeline_result.polished_text).strip()
+        translated_text_content = clean_for_audiobook_tts(pipeline_result.translated_text).strip()
+        _save_chapter_to_db(
+            job,
+            args,
+            polished_text=polished_text_content,
+            translated_text=translated_text_content,
+            polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
+            clear_audio=args.overwrite,
+            gate_source_text=gate_source_text,
+            genre=genre,
+            story_id=story_id,
+            slug=job_slug,
+            char_map=effective_char_map or "",
+            raw_language=raw_language,
+            pipeline_result=pipeline_result,
+            novel_engine=True,
+        )
+        translated_chapter_title = maybe_update_translated_chapter_title(
+            job, polished_text_content, args=args,
+        )
+    elif raw_language == "vi" or repair_action == "repolish":
         model = job.get("model") or args.vi_model
         max_chars = int(payload.get("polish_max_chars_per_chunk") or args.polish_max_chars_per_chunk)
         _check_resources(args, label="polish")
@@ -1302,11 +1404,18 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             source_language="vi",
             cleanup_on_fail=(output_path,),
         )
-        repo.update_chapter_text_outputs(
-            job["chapter_id"],
+        _save_chapter_to_db(
+            job,
+            args,
+            polished_text=polished_text_content,
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
-            polished_text_content=polished_text_content,
             clear_audio=args.overwrite,
+            gate_source_text=gate_source_text,
+            genre=genre,
+            story_id=story_id,
+            slug=job_slug,
+            char_map=effective_char_map or "",
+            raw_language=raw_language,
         )
     elif args.single_pass and raw_language == "en":
         # Single-pass EN→VI: translate + polish in one Ollama call.
@@ -1334,11 +1443,18 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             source_language=raw_language,
             cleanup_on_fail=(output_path,),
         )
-        repo.update_chapter_text_outputs(
-            job["chapter_id"],
+        _save_chapter_to_db(
+            job,
+            args,
+            polished_text=polished_text_content,
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
-            polished_text_content=polished_text_content,
             clear_audio=args.overwrite,
+            gate_source_text=gate_source_text,
+            genre=genre,
+            story_id=story_id,
+            slug=job_slug,
+            char_map=effective_char_map or "",
+            raw_language=raw_language,
         )
         # For single-pass, polished output IS the translated output — use it for chapter title and char-map.
         translated_chapter_title = maybe_update_translated_chapter_title(job, polished_text_content, args=args)
@@ -1456,13 +1572,20 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
         # Discard temp translated file only after polish finishes reading it.
         if no_save:
             translated_path.unlink(missing_ok=True)
-        repo.update_chapter_text_outputs(
-            job["chapter_id"],
-            translated_text_path=None if no_save else translated_path.as_posix(),
+        _save_chapter_to_db(
+            job,
+            args,
+            polished_text=polished_text_content,
+            translated_text=translated_text_content,
             polished_text_path=output_path.as_posix() if _tmp_out_dir is None else None,
-            translated_text_content=translated_text_content,
-            polished_text_content=polished_text_content,
+            translated_text_path=None if no_save else translated_path.as_posix(),
             clear_audio=args.overwrite,
+            gate_source_text=gate_source_text,
+            genre=genre,
+            story_id=story_id,
+            slug=job_slug,
+            char_map=effective_char_map or "",
+            raw_language=raw_language,
         )
         translated_chapter_title = maybe_update_translated_chapter_title(job, polished_text_content, args=args)
 
@@ -1498,7 +1621,6 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             **({"single_pass": True} if args.single_pass and raw_language == "en" else {}),
         },
     )
-    repo.set_chapter_quality_status(job["chapter_id"], "pending_audit")
     polished_text_content = locals().get("polished_text_content") or ""
     if polished_text_content and story_id and current_chapter > 0:
         broadcast_chapter_update(story_id=story_id, chapter_number=current_chapter)
@@ -1577,6 +1699,16 @@ def main() -> None:
                         help="LLM judge (sampled semantic QA) sau khi deterministic checks pass. "
                              "warn: log major issues, vẫn ghi DB (default — đang calibrate). "
                              "block: re-run pass với repair hints, chỉ có tác dụng khi --quality-gate block. off: tắt.")
+    parser.add_argument(
+        "--translation-engine",
+        choices=("auto", "legacy", "novel"),
+        default=os.environ.get("POLISH_TRANSLATION_ENGINE", "auto"),
+        help="EN translate path: novel=7-pass pipeline; legacy=translate_file+polish_file; "
+             "auto=novel for en, legacy for zh/ko/vi.",
+    )
+    parser.add_argument("--novel-chunk-size", type=int, default=1800)
+    parser.add_argument("--novel-skip-final-qa", action="store_true", help="Debug: skip novel FinalQA")
+    parser.add_argument("--novel-skip-polish", action="store_true", help="Debug: skip novel polish pass")
     parser.add_argument("--judge-model", default="",
                         help="Model cho LLM judge. Mặc định dùng --translate-model.")
     parser.add_argument("--no-auto-glossary", action="store_true",

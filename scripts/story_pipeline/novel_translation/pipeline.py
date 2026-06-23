@@ -81,6 +81,7 @@ class PipelineConfig:
     skip_polish: bool = False
     max_chunks: int = 0
     source_language: str = ""
+    repair_hints: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,7 @@ class PipelineResult:
     final_quality_warnings: list[str] = field(default_factory=list)
     total_elapsed_s: float = 0.0
     error: str = ""
+    translated_text: str = ""
     is_partial: bool = False
 
     @property
@@ -185,6 +187,7 @@ def _process_chunk(
         timeout=cfg.timeout_translator,
         num_ctx=cfg.num_ctx_translator,
         keep_alive=cfg.keep_alive,
+        repair_hints=cfg.repair_hints,
     )
 
     lines = translation.get("lines") or []
@@ -370,7 +373,12 @@ def translate_chapter(
             is_partial=is_partial,
         )
 
-    # Assemble full chapter text
+    # Assemble translated (pre-polish) and polished chapter text
+    all_translated_lines: list[dict] = []
+    for cr in chunk_results:
+        all_translated_lines.extend(cr.translation.get("lines") or [])
+    translated_text = reconstruct_text(all_translated_lines) if all_translated_lines else ""
+
     all_lines: list[dict] = []
     for cr in chunk_results:
         all_lines.extend(cr.polished_lines)
@@ -396,6 +404,13 @@ def translate_chapter(
             log.error("[FINAL_QUALITY] blocking=%s", final_quality_blocking)
         if final_quality_warnings:
             log.warning("[FINAL_QUALITY] warnings=%s", final_quality_warnings)
+        try:
+            from scripts.story_pipeline.term_alignment_check import check_term_alignment
+            for issue in check_term_alignment(source_for_quality, polished_text, genre=ctx.genre):
+                if issue not in final_quality_blocking:
+                    final_quality_blocking.append(issue)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[FINAL_QUALITY] term_alignment error: %s", exc)
 
     # Step 7: Final holistic QA
     final_qa: FinalQAReport | None = None
@@ -425,6 +440,7 @@ def translate_chapter(
         story_id=story_id,
         chapter_id=chapter_id,
         polished_text=polished_text,
+        translated_text=translated_text,
         chunk_results=chunk_results,
         final_qa=final_qa,
         final_quality_blocking=final_quality_blocking,

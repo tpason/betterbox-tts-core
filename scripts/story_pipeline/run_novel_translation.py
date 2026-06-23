@@ -37,6 +37,8 @@ sys.path.insert(0, str(ROOT))
 from story_db.story_pipeline_db import db, repository as repo
 from scripts.story_pipeline.novel_translation.pipeline import PipelineConfig, translate_chapter
 from scripts.story_pipeline.genre_prompts import detect_genre, load_char_map
+from scripts.story_pipeline.chapter_save_guard import SaveGateError, commit_guarded_chapter_outputs
+from scripts.story_pipeline.polish_chapter_texts_ollama import clean_for_audiobook_tts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -234,20 +236,44 @@ def main() -> None:
             if cr.polish_warnings:
                 print(f"  polish warnings: {cr.polish_warnings}")
 
-    # Save to DB if requested
-    if args.save and result.success and result.polished_text:
+    # Save to DB if requested (must pass chapter_save_guard)
+    if args.save:
+        if not result.success or not result.polished_text:
+            log.warning("[SAVE] skipped — pipeline did not succeed")
+            sys.exit(1)
+        polished = clean_for_audiobook_tts(result.polished_text).strip()
+        translated = clean_for_audiobook_tts(result.translated_text or "").strip()
+        gate_args = argparse.Namespace(
+            ollama_url=args.ollama_url,
+            translate_model=args.model,
+            judge_model=args.model,
+            llm_judge="block",
+            story_memory_dir=str(memory_dir or ""),
+        )
         chapter_id = str(chapter["id"])
-        with db.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """UPDATE chapters SET polished_text_content = %s, is_polished = true
-                       WHERE id = %s""",
-                    (result.polished_text, chapter_id),
-                )
-            conn.commit()
-        log.info("[SAVE] chapter %d polished content written to DB", args.chapter)
-    elif args.save and not result.success:
-        log.warning("[SAVE] skipped — pipeline did not succeed")
+        try:
+            commit_guarded_chapter_outputs(
+                chapter_id,
+                polished_text=polished,
+                translated_text=translated,
+                verify_kwargs={
+                    "source_text": raw_text,
+                    "genre": genre,
+                    "story_id": story_id,
+                    "slug": slug,
+                    "char_map": char_map_raw,
+                    "source_language": str(story.get("language") or "en"),
+                    "story_memory_dir": str(memory_dir or ""),
+                    "pipeline_result": result,
+                    "args": gate_args,
+                    "novel_engine": True,
+                    "translated_text": translated,
+                },
+            )
+        except SaveGateError as exc:
+            log.error("[SAVE] blocked by save gate: %s", ", ".join(exc.blocking))
+            sys.exit(2)
+        log.info("[SAVE] chapter %d passed save gate — written to DB", args.chapter)
 
     sys.exit(0 if result.success else 1)
 

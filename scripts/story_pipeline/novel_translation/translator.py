@@ -85,6 +85,7 @@ def _build_translator_prompt(
     ctx: StoryContext,
     resolution: dict[str, Any],
     current_chapter: int = 0,
+    repair_hints: str = "",
 ) -> list[dict[str, str]]:
     rel_chars = ctx.relevant_characters(chunk.source_text)
     rel_glossary = ctx.relevant_glossary(chunk.source_text)
@@ -102,8 +103,13 @@ def _build_translator_prompt(
         f"\nGLOSSARY:\n{glossary_block}",
         f"\nPRONOUN_RESOLUTION:\n{pronoun_block}",
         "\nPrevious context:\n" + chunk.context_tail if chunk.context_tail else "",
-        f"\nSOURCE_CHUNK (chunk_id={chunk.chunk_id}):\n{segments_to_source_block(chunk.segments)}",
     ]
+    hints = (repair_hints or "").strip()
+    if hints:
+        user_parts.append(f"\nREPAIR_HINTS (fix these from prior failed attempt):\n{hints[:2000]}")
+    user_parts.append(
+        f"\nSOURCE_CHUNK (chunk_id={chunk.chunk_id}):\n{segments_to_source_block(chunk.segments)}",
+    )
     user_content = "\n".join(p for p in user_parts if p)
 
     return [
@@ -139,6 +145,7 @@ def run_translator(
     timeout: int = 300,
     num_ctx: int = 32768,
     keep_alive: str = "10m",
+    repair_hints: str = "",
 ) -> dict[str, Any]:
     """Run translation draft for one chunk.
 
@@ -147,7 +154,9 @@ def run_translator(
     """
     import requests
 
-    messages = _build_translator_prompt(chunk, ctx, resolution, current_chapter)
+    messages = _build_translator_prompt(
+        chunk, ctx, resolution, current_chapter, repair_hints=repair_hints,
+    )
 
     payload = {
         "model": model,

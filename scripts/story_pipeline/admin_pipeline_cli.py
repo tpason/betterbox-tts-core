@@ -131,6 +131,28 @@ def cmd_retranslate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Audit polished chapters → auto route retranslate vs repolish → enqueue jobs."""
+    from scripts.story_pipeline.quality_audit import audit_story_range
+
+    summary = audit_story_range(
+        args.story_id,
+        from_chapter=args.from_chapter,
+        to_chapter=args.to_chapter,
+        only_needing_audit=args.only_needing_audit,
+        limit=args.limit,
+        tiers=(0, 1) if args.no_judge else (0, 1, 2),
+        judge_sample=0 if args.no_judge else args.judge_sample,
+        repair=True,
+        dry_run=args.dry_run,
+        ollama_url=args.ollama_url,
+        judge_model=args.judge_model,
+    )
+    payload = {"ok": True, "action": "repair", **summary}
+    _emit(payload, as_json=args.json)
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from scripts.story_pipeline.quality_audit import audit_story_range, backfill_priority_stories
 
@@ -415,10 +437,27 @@ def main() -> None:
     audit_p.add_argument("--judge-model", default="qwen3:14b")
     audit_p.add_argument("--json", action="store_true")
 
+    repair_p = sub.add_parser(
+        "repair",
+        help="Scan QA → auto retranslate/repolish failed chapters (recommended)",
+    )
+    repair_p.add_argument("--story-id", required=True)
+    repair_p.add_argument("--from-chapter", type=int, default=0)
+    repair_p.add_argument("--to-chapter", type=int, default=0)
+    repair_p.add_argument("--only-needing-audit", action="store_true")
+    repair_p.add_argument("--limit", type=int, default=0)
+    repair_p.add_argument("--judge-sample", type=int, default=5)
+    repair_p.add_argument("--no-judge", action="store_true", help="Tier 0+1 only (faster backfill)")
+    repair_p.add_argument("--dry-run", action="store_true")
+    repair_p.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    repair_p.add_argument("--judge-model", default="qwen3:14b")
+    repair_p.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     handlers = {
         "repolish": cmd_repolish,
         "retranslate": cmd_retranslate,
+        "repair": cmd_repair,
         "audit": cmd_audit,
         "recrawl-story": cmd_recrawl_story,
         "recrawl-chapters": cmd_recrawl_chapters,

@@ -85,3 +85,25 @@ def request_chapter_repair(
         force_running=force_running,
         max_attempts=MAX_REPAIR_ATTEMPTS,
     )
+
+
+def request_force_repair_range(
+    chapter_ids: list[str],
+    action: str,
+    *,
+    dry_run: bool = False,
+    force_running: bool = False,
+) -> list[dict[str, Any]]:
+    """Force repolish or retranslate for chapters (no issue-based routing)."""
+    out: list[dict[str, Any]] = []
+    for chapter_id in chapter_ids:
+        out.append(
+            request_chapter_repair(
+                chapter_id,
+                [],
+                action=action,
+                dry_run=dry_run,
+                force_running=force_running,
+            )
+        )
+    return out

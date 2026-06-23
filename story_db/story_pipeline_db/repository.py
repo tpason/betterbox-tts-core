@@ -163,6 +163,19 @@ def get_story_by_id(story_id: str) -> dict[str, Any]:
         return dict(row)
 
 
+def get_chapter_by_story_number(story_id: str, chapter_number: int) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, chapter_number, raw_text_content, translated_text_content, polished_text_content
+            FROM chapters
+            WHERE story_id = %(story_id)s::uuid AND chapter_number = %(chapter_number)s
+            """,
+            {"story_id": story_id, "chapter_number": chapter_number},
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def find_stories(
     *,
     title_contains: str | None = None,
@@ -1032,11 +1045,13 @@ def update_chapter_text_outputs(
     translated_text_content: str | None = None,
     polished_text_content: str | None = None,
     clear_audio: bool = False,
+    quality_status: str | None = None,
 ) -> dict[str, Any]:
     """Update text output columns for a chapter.
 
     clear_audio: khi True và polished_text_content được set, xóa is_audio_generated + audio_path.
     Dùng khi re-polish (--overwrite) để audio cũ không còn được serve sau khi text thay đổi.
+    quality_status: when set, updated atomically with text columns (save guard).
     """
     with connect() as conn:
         row = conn.execute(
@@ -1072,6 +1087,7 @@ def update_chapter_text_outputs(
                     THEN now()
                     ELSE text_content_backfilled_at
                 END,
+                quality_status = COALESCE(%(quality_status)s::text, quality_status),
                 updated_at = now()
             WHERE id = %(chapter_id)s
             RETURNING *
@@ -1084,6 +1100,7 @@ def update_chapter_text_outputs(
                 "translated_text_content": translated_text_content,
                 "polished_text_content": polished_text_content,
                 "clear_audio": clear_audio,
+                "quality_status": quality_status,
             },
         ).fetchone()
         assert row is not None
