@@ -477,7 +477,8 @@ def run_full_quality_check(
         if memory.loaded:
             for issue in find_story_memory_quality_issues(text, memory, genre=genre):
                 if issue.startswith("term/name drift"):
-                    blocking.append(issue)
+                    # Ambiguous glossary drift — warning for audit; blocking only via golden/term_alignment.
+                    warnings.append(issue)
                 else:
                     warnings.append(issue)
     except Exception as exc:  # noqa: BLE001 — memory QA không được làm chết caller

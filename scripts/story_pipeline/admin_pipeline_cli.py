@@ -131,6 +131,38 @@ def cmd_retranslate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    from scripts.story_pipeline.quality_audit import audit_story_range, backfill_priority_stories
+
+    if args.backfill_priority:
+        summaries = backfill_priority_stories(
+            judge_sample=args.judge_sample,
+            repair=args.repair,
+            dry_run=args.dry_run,
+            limit_per_story=args.limit,
+            story_ids=[args.story_id] if args.story_id else None,
+        )
+        payload = {"ok": True, "action": "backfill_priority", "summaries": summaries}
+        _emit(payload, as_json=args.json)
+        return 0
+
+    summary = audit_story_range(
+        args.story_id,
+        from_chapter=args.from_chapter,
+        to_chapter=args.to_chapter,
+        only_needing_audit=args.only_needing_audit,
+        limit=args.limit,
+        judge_sample=args.judge_sample,
+        repair=args.repair,
+        dry_run=args.dry_run,
+        ollama_url=args.ollama_url,
+        judge_model=args.judge_model,
+    )
+    payload = {"ok": True, "action": "audit", **summary}
+    _emit(payload, as_json=args.json)
+    return 0
+
+
 def cmd_recrawl_story(args: argparse.Namespace) -> int:
     story = repo.request_story_recrawl(args.story_id)
     if not story:
@@ -182,7 +214,7 @@ def cmd_translate_metadata(args: argparse.Namespace) -> int:
         cmd.append("--skip-story")
     if args.skip_chapters:
         cmd.append("--skip-chapters")
-    if args.apply:
+    if args.apply and not args.dry_run:
         cmd.append("--apply")
     rc = subprocess.call(cmd, cwd=ROOT)
     payload = {"ok": rc == 0, "action": "translate_metadata", "exit_code": rc}
@@ -349,10 +381,11 @@ def main() -> None:
     meta_p.add_argument("--skip-story", action="store_true")
     meta_p.add_argument("--skip-chapters", action="store_true")
     meta_p.add_argument("--apply", action="store_true")
-    meta_p.add_argument("--dry-run", action="store_true")
+    meta_p.add_argument("--dry-run", action="store_true", help="Do not pass --apply to backfill script")
     meta_p.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     meta_p.add_argument("--translate-model", default="qwen3:14b")
     meta_p.add_argument("--story-model", default="")
+    meta_p.add_argument("--json", action="store_true")
 
     discover_p = sub.add_parser("discover", help="discover_hot_stories.py — tìm truyện mới")
     discover_p.add_argument("--pages", type=int, default=2)
@@ -368,10 +401,25 @@ def main() -> None:
     crawl_one_p.add_argument("--story-id", required=True)
     _add_crawl_options(crawl_one_p)
 
+    audit_p = sub.add_parser("audit", help="Tiered QA audit + optional repair enqueue")
+    audit_p.add_argument("--story-id", required=True)
+    audit_p.add_argument("--from-chapter", type=int, default=0)
+    audit_p.add_argument("--to-chapter", type=int, default=0)
+    audit_p.add_argument("--only-needing-audit", action="store_true")
+    audit_p.add_argument("--limit", type=int, default=0)
+    audit_p.add_argument("--judge-sample", type=int, default=5)
+    audit_p.add_argument("--repair", action="store_true", help="Enqueue repolish/retranslate for failures")
+    audit_p.add_argument("--backfill-priority", action="store_true", help="All priority stories")
+    audit_p.add_argument("--dry-run", action="store_true")
+    audit_p.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    audit_p.add_argument("--judge-model", default="qwen3:14b")
+    audit_p.add_argument("--json", action="store_true")
+
     args = parser.parse_args()
     handlers = {
         "repolish": cmd_repolish,
         "retranslate": cmd_retranslate,
+        "audit": cmd_audit,
         "recrawl-story": cmd_recrawl_story,
         "recrawl-chapters": cmd_recrawl_chapters,
         "translate-metadata": cmd_translate_metadata,

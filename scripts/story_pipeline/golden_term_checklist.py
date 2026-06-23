@@ -39,6 +39,10 @@ class GoldenFinding:
 # Profile: A Regressor's Tale / korean_cultivation + trong_sinh
 _KOREAN_CULTIVATION_REGRESSOR_RULES: list[GoldenRule] = [
     GoldenRule(
+        re.compile(r"\bthế k[íỉỷ]\b", re.IGNORECASE),
+        "cultivation — 'thế kí/thế kỷ' sai nghĩa; hand seal → ấn quyết / kết ấn",
+    ),
+    GoldenRule(
         re.compile(r"\bhồi phục\b", re.IGNORECASE),
         "regressor/cultivation — dùng 'Hồi Quy' / 'hồi quy', không 'hồi phục' (dễ nhầm healing)",
     ),
