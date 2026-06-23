@@ -131,6 +131,91 @@ def cmd_retranslate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _issue_codes_from_jsonb(raw: Any) -> list[str]:
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    codes: list[str] = []
+    for item in raw:
+        if isinstance(item, dict):
+            code = str(item.get("code") or "").strip()
+            if code:
+                codes.append(code)
+        elif isinstance(item, str) and item.strip():
+            codes.append(item.strip())
+    return codes
+
+
+def cmd_smart_repair(args: argparse.Namespace) -> int:
+    """Enqueue repolish/retranslate from stored QA issues — no re-scan (cheap)."""
+    from scripts.story_pipeline.quality_remediation import request_chapter_repair
+
+    chapter_numbers = _parse_chapter_numbers(args.chapter_numbers or "")
+    query = """
+        SELECT c.id AS chapter_id, c.chapter_number, c.quality_issues, c.quality_repair_attempts
+        FROM chapters c
+        WHERE c.story_id = %(story_id)s
+    """
+    params: dict[str, Any] = {"story_id": args.story_id}
+    if chapter_numbers:
+        query += " AND c.chapter_number = ANY(%(chapter_numbers)s::int[])"
+        params["chapter_numbers"] = chapter_numbers
+    elif args.from_chapter:
+        query += " AND c.chapter_number >= %(from_chapter)s"
+        params["from_chapter"] = args.from_chapter
+    if args.to_chapter:
+        query += " AND c.chapter_number <= %(to_chapter)s"
+        params["to_chapter"] = args.to_chapter
+    if not chapter_numbers and not args.from_chapter and not args.to_chapter:
+        query += " AND c.quality_status IN ('failed', 'failed_manual')"
+    query += " ORDER BY c.chapter_number"
+
+    from story_db.story_pipeline_db.db import connect
+
+    with connect() as conn:
+        rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        issues = _issue_codes_from_jsonb(row.get("quality_issues"))
+        if not issues:
+            results.append(
+                {
+                    "ok": False,
+                    "error": "no_issues",
+                    "chapter_number": row["chapter_number"],
+                }
+            )
+            continue
+        forced = (args.action or "").strip().lower()
+        result = request_chapter_repair(
+            str(row["chapter_id"]),
+            issues,
+            action=forced if forced in {"repolish", "retranslate"} else "",
+            dry_run=args.dry_run,
+            force_running=args.force_running,
+        )
+        results.append(result)
+
+    ok_count = sum(1 for r in results if r.get("ok"))
+    payload = {
+        "ok": True,
+        "action": "smart_repair",
+        "count": ok_count,
+        "total": len(results),
+        "results": results,
+        "chapter_numbers": [r.get("chapter_number") for r in results if r.get("chapter_number")],
+    }
+    _emit(payload, as_json=args.json)
+    return 0 if ok_count > 0 or not results else 1
+
+
 def cmd_repair(args: argparse.Namespace) -> int:
     """Audit polished chapters → auto route retranslate vs repolish → enqueue jobs."""
     from scripts.story_pipeline.quality_audit import audit_story_range
@@ -437,6 +522,18 @@ def main() -> None:
     audit_p.add_argument("--judge-model", default="qwen3:14b")
     audit_p.add_argument("--json", action="store_true")
 
+    smart_repair_p = sub.add_parser(
+        "smart-repair",
+        help="Enqueue repair from stored QA issues (no re-scan)",
+    )
+    _add_chapter_filters(smart_repair_p)
+    smart_repair_p.add_argument(
+        "--action",
+        choices=("repolish", "retranslate"),
+        default="",
+        help="Force action instead of issue-based routing",
+    )
+
     repair_p = sub.add_parser(
         "repair",
         help="Scan QA → auto retranslate/repolish failed chapters (recommended)",
@@ -457,6 +554,7 @@ def main() -> None:
     handlers = {
         "repolish": cmd_repolish,
         "retranslate": cmd_retranslate,
+        "smart-repair": cmd_smart_repair,
         "repair": cmd_repair,
         "audit": cmd_audit,
         "recrawl-story": cmd_recrawl_story,

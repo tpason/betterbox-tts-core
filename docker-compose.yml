@@ -152,6 +152,8 @@ services:
       STORY_PIPELINE_ROOT: ${STORY_PIPELINE_ROOT:-/repo}
       STORY_PIPELINE_PYTHON: ${STORY_PIPELINE_PYTHON:-}
       STORY_PIPELINE_DOCKER: ${STORY_PIPELINE_DOCKER:-1}
+      # QA: admin xem DB + user-triggered scan; không spawn từ container (GPU). CLI trên host.
+      STORY_PIPELINE_DISABLE_QA_SPAWN: ${STORY_PIPELINE_DISABLE_QA_SPAWN:-1}
       STORY_PIPELINE_DOCKER_SERVICE: ${STORY_PIPELINE_DOCKER_SERVICE:-story-pipeline-cli}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
