@@ -62,6 +62,7 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
       PUSH_SEND_SECRET: ${PUSH_SEND_SECRET:-}
+      READER_SIGNUP_DISABLED: ${READER_SIGNUP_DISABLED:-}
       AUDIO_API_BLOCKING_JOB_TYPES: ${AUDIO_API_BLOCKING_JOB_TYPES:-audio_chapter_segments,audio_chapter,polish_chapter}
       AUDIO_API_MAX_RUNNING_JOBS: ${AUDIO_API_MAX_RUNNING_JOBS:-1}
       AUDIO_API_MAX_QUEUED_JOBS: ${AUDIO_API_MAX_QUEUED_JOBS:-1}
@@ -114,6 +115,8 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      PUSH_SEND_SECRET: ${PUSH_SEND_SECRET:-}
+      READER_SIGNUP_DISABLED: ${READER_SIGNUP_DISABLED:-}
     extra_hosts: *host-gateway
     logging: *default-logging
     ports:

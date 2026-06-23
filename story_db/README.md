@@ -18,6 +18,11 @@ Database mặc định:
 postgresql://betterbox:betterbox@127.0.0.1:54329/betterbox_story
 ```
 
+**Bảo mật (production):**
+
+- Postgres chỉ bind `127.0.0.1:54329` (không expose ra LAN).
+- Đổi mật khẩu: tạo `story_db/.env` với `POSTGRES_PASSWORD=...` rồi cập nhật `STORY_DATABASE_URL` ở root `.env` và các service Docker.
+
 Nếu muốn dùng URL khác:
 
 ```bash
