@@ -6,6 +6,9 @@ x-pipeline-env: &pipeline-env
   READER_REALTIME_URL: ${READER_REALTIME_URL:-http://story-reader:3000}
   READER_REALTIME_DEV_URL: ${READER_REALTIME_DEV_URL:-}
   READER_REALTIME_TOKEN: ${READER_REALTIME_TOKEN:-}
+  # Writable dirs when host story_data/ is 775 non-root (Docker runs as root).
+  DISCOVERY_OUTPUT_DIR: ${DISCOVERY_OUTPUT_DIR:-/tmp/betterbox-discovery}
+  DISCOVERY_URL_SKIP_STATE: ${DISCOVERY_URL_SKIP_STATE:-/tmp/betterbox-discovery/url_skip_state.json}
 
 x-host-gateway: &host-gateway
   - "host.docker.internal:host-gateway"
@@ -201,7 +204,7 @@ services:
     environment:
       <<: *pipeline-env
       DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-86400}
-      DISCOVERY_SOURCES: ${DISCOVERY_SOURCES:-royalroad truyenfull_today}
+      DISCOVERY_SOURCES: ${DISCOVERY_SOURCES:-royalroad skydemonorder truyenfull_today}
       DISCOVERY_PAGES: ${DISCOVERY_PAGES:-2}
       DISCOVERY_MIN_CHAPTERS: ${DISCOVERY_MIN_CHAPTERS:-30}
     extra_hosts: *host-gateway
@@ -225,7 +228,7 @@ services:
     environment:
       <<: *pipeline-env
       CRAWLER_INTERVAL_SECONDS: ${CRAWLER_INTERVAL_SECONDS:-300}
-      CRAWLER_SOURCES: ${CRAWLER_SOURCES:-truyenfull_today truyenyy docln sttruyen truyenchuhay truyenhoangdung wattpad_vn royalroad lightnovelpub novelbin freewebnovel novelhub}
+      CRAWLER_SOURCES: ${CRAWLER_SOURCES:-truyenfull_today truyenyy docln sttruyen truyenchuhay truyenhoangdung wattpad_vn royalroad skydemonorder wetriedtls lightnovelpub novelbin freewebnovel novelhub fanmtl}
       # Max threads per container; check_resources.py scales this down when system is busy.
       CRAWLER_WORKERS: ${CRAWLER_WORKERS:-4}
       CRAWLER_MIN_FREE_RAM_GB: ${CRAWLER_MIN_FREE_RAM_GB:-1.0}
@@ -385,6 +388,7 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       POLISH_WORKERS: ${POLISH_WORKERS:-1}
       POLISH_SOURCE_CODES: ${POLISH_SOURCE_CODES:-}
+      POLISH_CLAIM_ORDER: ${POLISH_CLAIM_ORDER:-non-vi-rank-tier}
       POLISH_VI_MODEL: ${POLISH_VI_MODEL:-qwen3:14b}
       POLISH_TRANSLATE_MODEL: ${POLISH_TRANSLATE_MODEL:-qwen3:14b}
       POLISH_POST_TRANSLATE: ${POLISH_POST_TRANSLATE:-polish}

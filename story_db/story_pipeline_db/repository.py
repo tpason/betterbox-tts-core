@@ -25,6 +25,19 @@ NON_VI_SOURCE_CODES = (
 )
 NON_VI_RAW_LANGUAGE_CODES = ("en", "zh", "ko", "ja", "zh-cn", "zh-tw")
 
+# English-origin sources that support bilingual reader (EN raw + VI polish).
+ENGLISH_LEARNING_SOURCE_CODES = (
+    "royalroad",
+    "lightnovelpub",
+    "novelbin",
+    "freewebnovel",
+    "novelhub",
+    "skydemonorder",
+    "wetriedtls",
+    "fanmtl",
+    "novelfire",
+)
+
 _non_vi_sources_sql = ", ".join(f"'{code}'" for code in NON_VI_SOURCE_CODES)
 _non_vi_langs_sql = ", ".join(f"'{code}'" for code in NON_VI_RAW_LANGUAGE_CODES)
 
@@ -207,6 +220,62 @@ def find_stories(
 
     with connect() as conn:
         rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+
+def list_bilingual_ready_stories(
+    *,
+    source_codes: Sequence[str] | None = None,
+    min_polished: int = 1,
+    min_bilingual_chapters: int = 1,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Stories with both EN raw and VI polished text on the same chapter (bilingual reader)."""
+    codes = list(source_codes or ENGLISH_LEARNING_SOURCE_CODES)
+    min_polished = max(0, int(min_polished))
+    min_bilingual = max(1, int(min_bilingual_chapters))
+    limit = max(1, int(limit))
+
+    query = """
+        SELECT
+          s.id,
+          s.title,
+          src.code AS source_code,
+          s.rank_position,
+          COUNT(*) FILTER (WHERE c.is_polished) AS polished_count,
+          COUNT(*) FILTER (
+            WHERE length(COALESCE(c.raw_text_content, '')) > 100
+          ) AS raw_count,
+          COUNT(*) FILTER (
+            WHERE c.is_polished
+              AND length(COALESCE(c.raw_text_content, '')) > 100
+              AND length(COALESCE(c.polished_text_content, '')) > 100
+          ) AS bilingual_ready_count,
+          MAX(c.chapter_number) FILTER (
+            WHERE c.is_polished
+              AND length(COALESCE(c.raw_text_content, '')) > 100
+              AND length(COALESCE(c.polished_text_content, '')) > 100
+          ) AS max_bilingual_chapter
+        FROM stories s
+        JOIN sources src ON src.id = s.source_id
+        JOIN chapters c ON c.story_id = s.id
+        WHERE s.is_active = TRUE
+          AND src.code = ANY(%s)
+        GROUP BY s.id, s.title, src.code, s.rank_position
+        HAVING COUNT(*) FILTER (WHERE c.is_polished) >= %s
+           AND COUNT(*) FILTER (
+             WHERE c.is_polished
+               AND length(COALESCE(c.raw_text_content, '')) > 100
+               AND length(COALESCE(c.polished_text_content, '')) > 100
+           ) >= %s
+        ORDER BY bilingual_ready_count DESC, s.rank_position ASC NULLS LAST, s.title ASC
+        LIMIT %s
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            query,
+            (codes, min_polished, min_bilingual, limit),
+        ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -1428,10 +1497,14 @@ def claim_active_stories(
                     OR (s.metadata->>'last_crawl_finished_at')::timestamptz <= now() - make_interval(mins => %s)
               )
               AND (s.metadata->>'source_host_unavailable' IS NULL OR s.metadata->>'source_host_unavailable' = 'false')
+    """
+    query += f"""
             ORDER BY {STORY_PRIORITY_ORDER_SQL}
             LIMIT %s
             FOR UPDATE SKIP LOCKED
         )
+    """
+    query += """
         UPDATE stories s
         SET metadata = COALESCE(s.metadata, '{}'::jsonb) || jsonb_build_object(
                 'crawl_claimed_by', %s::text,

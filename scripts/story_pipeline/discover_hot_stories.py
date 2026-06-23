@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -64,6 +65,11 @@ SOURCES = {
     "skydemonorder": {
         "name": "Sky Demon Order",
         "base_url": "https://skydemonorder.com",
+        "language": "en",
+    },
+    "fanmtl": {
+        "name": "FanMTL",
+        "base_url": "https://fanmtl.com",
         "language": "en",
     },
 }
@@ -165,7 +171,11 @@ DEFAULT_SKYDEMONORDER_URLS = [
     "https://skydemonorder.com/projects?pp=48",
 ]
 
-DEFAULT_PRODUCTION_SOURCES = ["truyenfull_today", "royalroad"]
+DEFAULT_FANMTL_URLS = [
+    "https://www.fanmtl.com/",
+]
+
+DEFAULT_PRODUCTION_SOURCES = ["truyenfull_today", "royalroad", "skydemonorder"]
 
 DEFAULT_INCLUDE_KEYWORDS = [
     "tiên hiệp",
@@ -287,7 +297,8 @@ class UrlSkipCache:
     _SCHEMA_VERSION = 1
 
     def __init__(self, path: Path, *, enabled: bool = True) -> None:
-        self.path = path
+        override = (os.environ.get("DISCOVERY_URL_SKIP_STATE") or "").strip()
+        self.path = Path(override) if override else path
         self.enabled = enabled
         self._state: dict = {}
         if enabled:
@@ -311,11 +322,30 @@ class UrlSkipCache:
             self._state = {"schema_version": self._SCHEMA_VERSION, "updated_at": "", "urls": {}}
 
     def _save(self) -> None:
+        if not self.enabled:
+            return
         self._state["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self._state, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self.path)
+        body = json.dumps(self._state, ensure_ascii=False, indent=2)
+        candidates = [
+            self.path,
+            Path(os.environ.get("TMPDIR", "/tmp")) / "betterbox-discovery" / self.path.name,
+        ]
+        seen: set[Path] = set()
+        for path in candidates:
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(body, encoding="utf-8")
+                tmp.replace(path)
+                if path != self.path:
+                    print(f"[WARN] url skip cache wrote fallback: {path}", flush=True)
+                    self.path = path
+                return
+            except OSError as exc:
+                print(f"[WARN] url skip cache save skip {path}: {exc}", flush=True)
 
     def should_skip(self, url: str) -> bool:
         if not self.enabled:
@@ -1588,6 +1618,77 @@ def discover_skydemonorder(
     return candidates
 
 
+def discover_fanmtl(
+    list_urls: list[str],
+    timeout: int,
+    pages: int,
+    retries: int,
+    retry_sleep: float,
+    *,
+    limit_per_page: int = 40,
+) -> list[StoryCandidate]:
+    from scripts.story_pipeline.crawl_fanmtl_chapters import (
+        canonical_story_url,
+        discover_story_urls,
+        parse_catalog,
+    )
+
+    candidates: list[StoryCandidate] = []
+    seen: set[str] = set()
+    rank_position = 0
+    cap = limit_per_page * max(1, pages) if limit_per_page else 0
+
+    for list_url in list_urls:
+        try:
+            story_urls = discover_story_urls(
+                [list_url],
+                timeout=timeout,
+                retries=retries,
+                retry_sleep=retry_sleep,
+                limit=cap or 0,
+            )
+        except Exception as exc:
+            print(f"[WARN] skip fanmtl list {list_url}: {exc}")
+            continue
+
+        for story_url in story_urls:
+            story_url = canonical_story_url(story_url)
+            if story_url in seen:
+                continue
+            seen.add(story_url)
+            try:
+                catalog = parse_catalog(
+                    story_url,
+                    timeout=timeout,
+                    retries=retries,
+                    retry_sleep=retry_sleep,
+                    max_catalog_pages=1,
+                )
+            except Exception as exc:
+                print(f"[WARN] skip fanmtl catalog {story_url}: {exc}")
+                continue
+
+            rank_position += 1
+            candidates.append(
+                StoryCandidate(
+                    source_code="fanmtl",
+                    source_url=story_url,
+                    title=str(catalog.get("title") or ""),
+                    author=str(catalog.get("author") or ""),
+                    category=", ".join(catalog.get("tags") or []),
+                    description=str(catalog.get("description") or "")[:500],
+                    cover_image_url=str(catalog.get("cover_image_url") or ""),
+                    rank_name=Path(urlparse(list_url).path).name or "rank",
+                    rank_position=rank_position,
+                    total_chapters=int(catalog.get("total_chapters") or len(catalog.get("chapters") or [])),
+                    language="en",
+                    discovered_from=list_url,
+                    tags=list(catalog.get("tags") or []),
+                )
+            )
+    return candidates
+
+
 def dedupe_candidates(candidates: Iterable[StoryCandidate]) -> list[StoryCandidate]:
     seen: set[tuple[str, str]] = set()
     deduped: list[StoryCandidate] = []
@@ -1599,6 +1700,34 @@ def dedupe_candidates(candidates: Iterable[StoryCandidate]) -> list[StoryCandida
         seen.add(key)
         deduped.append(candidate)
     return deduped
+
+
+def write_discovery_snapshot(payload: dict[str, object], output_path: Path) -> Path | None:
+    """Write discovery audit JSON. DB upsert is separate; failures here must not abort discovery."""
+    body = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    candidates = [output_path]
+    override = (os.environ.get("DISCOVERY_OUTPUT_DIR") or "").strip()
+    if override:
+        candidates.append(Path(override) / output_path.name)
+    candidates.append(Path(os.environ.get("TMPDIR", "/tmp")) / "betterbox-discovery" / output_path.name)
+
+    seen: set[Path] = set()
+    last_error: OSError | None = None
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            if path != output_path:
+                print(f"[WARN] discovery output wrote fallback: {path}", flush=True)
+            return path
+        except OSError as exc:
+            last_error = exc
+            print(f"[WARN] discovery output skip {path}: {exc}", flush=True)
+    print(f"[WARN] discovery output not saved: {last_error}", flush=True)
+    return None
 
 
 def upsert_candidates(candidates: Iterable[StoryCandidate]) -> tuple[int, int]:
@@ -1657,7 +1786,7 @@ def upsert_candidates(candidates: Iterable[StoryCandidate]) -> tuple[int, int]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Discover truyện hot từ Qidian/Hako/Wattpad VN/TruyenFull Today/Naver Series/Royal Road/Sky Demon Order, lọc genre/content, "
+            "Discover truyện hot từ Qidian/Hako/Wattpad VN/TruyenFull Today/Naver Series/Royal Road/Sky Demon Order/FanMTL, lọc genre/content, "
             "rồi ghi candidate vào story_data/discovery và bảng stories."
         )
     )
@@ -1733,6 +1862,7 @@ def main() -> None:
     parser.add_argument("--skydemonorder-headful", action="store_true", help="Mở browser thật để xử lý Cloudflare/login.")
     parser.add_argument("--skydemonorder-manual-wait", type=int, default=0)
     parser.add_argument("--skydemonorder-wait-ms", type=int, default=1500)
+    parser.add_argument("--fanmtl-urls", nargs="*", default=DEFAULT_FANMTL_URLS)
     parser.add_argument(
         "--pages",
         type=int,
@@ -1841,6 +1971,7 @@ def main() -> None:
             "naver_series": args.naver_series_urls if "naver_series" in args.sources else [],
             "royalroad": args.royalroad_urls if "royalroad" in args.sources else [],
             "skydemonorder": args.skydemonorder_urls if "skydemonorder" in args.sources else [],
+            "fanmtl": args.fanmtl_urls if "fanmtl" in args.sources else [],
         }
         reachable_hosts, _rediscovered_host_urls = preflight_and_rediscover(all_url_groups, args.preflight_timeout)
 
@@ -2017,6 +2148,17 @@ def main() -> None:
                 wait_ms=args.skydemonorder_wait_ms,
             )
         )
+    if "fanmtl" in args.sources:
+        raw_candidates.extend(
+            discover_fanmtl(
+                live(args.fanmtl_urls),
+                args.timeout,
+                args.pages,
+                args.retries,
+                args.retry_sleep,
+                limit_per_page=args.limit_per_page,
+            )
+        )
 
     deduped = dedupe_candidates(raw_candidates)
     accepted = apply_filters(
@@ -2047,37 +2189,33 @@ def main() -> None:
         else Path("story_data/discovery")
         / f"hot_stories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(
-            {
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "sources": args.sources,
-                "total_raw": len(raw_candidates),
-                "total_deduped": len(deduped),
-                "total_accepted": len(accepted),
-                "pages": args.pages,
-                "limit_per_page": args.limit_per_page,
-                "limit_per_source": args.limit_per_source,
-                "include_keywords": include_keywords,
-                "exclude_keywords": exclude_keywords,
-                "stories": [asdict(candidate) for candidate in accepted],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
     db_count = 0
     db_new = 0
     if not args.no_db:
         db_count, db_new = upsert_candidates(accepted)
 
+    snapshot = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "sources": args.sources,
+        "total_raw": len(raw_candidates),
+        "total_deduped": len(deduped),
+        "total_accepted": len(accepted),
+        "pages": args.pages,
+        "limit_per_page": args.limit_per_page,
+        "limit_per_source": args.limit_per_source,
+        "include_keywords": include_keywords,
+        "exclude_keywords": exclude_keywords,
+        "stories": [asdict(candidate) for candidate in accepted],
+        "db_upsert": db_count,
+        "db_new": db_new,
+    }
+    written_path = write_discovery_snapshot(snapshot, output_path)
+
     print(
         f"Discovery xong: raw={len(raw_candidates)} dedupe={len(deduped)} "
-        f"accepted={len(accepted)} db_upsert={db_count} db_new={db_new} output={output_path}"
+        f"accepted={len(accepted)} db_upsert={db_count} db_new={db_new} "
+        f"output={written_path or 'none'}"
     )
     for source_code in args.sources:
         print(

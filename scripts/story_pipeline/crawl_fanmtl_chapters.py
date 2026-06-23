@@ -18,9 +18,9 @@ Usage (from Docker — recommended):
   docker compose exec story-crawler-scheduler python /app/scripts/story_pipeline/crawl_fanmtl_chapters.py \
     https://fanmtl.com/novel/ke383028.html --upsert-db --download-text
 
-  # Discovery from ranking page
+  # Discovery from homepage (rank/ path may 404 after www redirect)
   docker compose exec story-crawler-scheduler python /app/scripts/story_pipeline/crawl_fanmtl_chapters.py \
-    --discover-url https://fanmtl.com/rank/ --discover-limit 20 --upsert-db
+    --discover-url https://www.fanmtl.com/ --discover-limit 20 --upsert-db
 """
 from __future__ import annotations
 

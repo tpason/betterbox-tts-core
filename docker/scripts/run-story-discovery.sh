@@ -12,6 +12,14 @@ while true; do
     --pages "${DISCOVERY_PAGES:-2}" \
     --min-chapters "${DISCOVERY_MIN_CHAPTERS:-30}"
 
+  if [ -n "${DISCOVERY_OUTPUT_DIR:-}" ]; then
+    export DISCOVERY_OUTPUT_DIR
+  fi
+
+  if [ -n "${DISCOVERY_URL_SKIP_STATE:-}" ]; then
+    export DISCOVERY_URL_SKIP_STATE
+  fi
+
   if [ -n "${DISCOVERY_SOURCES:-}" ]; then
     set -- "$@" --sources ${DISCOVERY_SOURCES}
   fi

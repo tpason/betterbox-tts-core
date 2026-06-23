@@ -53,3 +53,18 @@ def test_story_priority_sort_key_orders_non_vi_before_vi_at_same_rank():
     non_vi = story_priority_sort_key(source_code="royalroad", rank_position=2)
     vi = story_priority_sort_key(source_code="truyenfull_today", rank_position=2)
     assert non_vi < vi
+
+
+def test_claim_active_stories_sql_interpolates_priority_order():
+    """Regression: ORDER BY must not pass literal {STORY_PRIORITY_ORDER_SQL} to Postgres."""
+    from story_db.story_pipeline_db import repository as repo
+
+    rows = repo.claim_active_stories(
+        worker_id="pytest-claim-active-stories",
+        limit=1,
+        claim_ttl_minutes=1,
+        finished_cooldown_minutes=0,
+    )
+    assert isinstance(rows, list)
+    for row in rows:
+        repo.release_story_claim(row["id"], worker_id="pytest-claim-active-stories", status="test")
