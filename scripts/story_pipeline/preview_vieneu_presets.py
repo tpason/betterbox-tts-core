@@ -35,6 +35,7 @@ from scripts.story_pipeline.resource_guard import (  # noqa: E402
 from scripts.story_pipeline.vieneu_voice_profiles import (  # noqa: E402
     DEFAULT_VIENEU_VOICE_PROFILE,
     get_vieneu_voice_profile,
+    resolve_vieneu_voice_profile,
 )
 from scripts.story_pipeline.vieneu_audiobook_stitch import (  # noqa: E402
     DEFAULT_MAX_NEW_FRAMES,
@@ -73,6 +74,20 @@ def _use_cuda(device: str) -> bool:
     return device not in ("cpu",) and "cpu" not in device.lower()
 
 
+def _configure_cpu_threads(device: str, num_threads: int) -> None:
+    if num_threads <= 0 or _use_cuda(device):
+        return
+    os.environ.setdefault("OMP_NUM_THREADS", str(num_threads))
+    os.environ.setdefault("MKL_NUM_THREADS", str(num_threads))
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", str(num_threads))
+    try:
+        import torch
+
+        torch.set_num_threads(num_threads)
+    except Exception:
+        pass
+
+
 def _wait_for_resources(args: argparse.Namespace, *, label: str) -> None:
     if args.force:
         print(f"[WARN] --force: skipping resource check ({label})", flush=True)
@@ -109,7 +124,7 @@ def _wait_for_resources(args: argparse.Namespace, *, label: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Preview VieNeu voices for xianxia audiobook.")
-    parser.add_argument("--output-dir", default="/tmp/vieneu_voice_samples")
+    parser.add_argument("--output-dir", default="story_data/voice_samples")
     parser.add_argument("--text", default=XIANXIA_SAMPLE)
     parser.add_argument("--profiles", default=",".join(DEFAULT_COMPARE))
     parser.add_argument("--device", default="cpu", help="cpu (safe default) or auto/cuda")
@@ -172,7 +187,15 @@ def main() -> int:
         default=float(os.environ.get("TTS_PROFILE_COOLDOWN_SECONDS", "10")),
         help="Pause between profiles to let CPU/RAM recover",
     )
+    parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=int(os.environ.get("TTS_TORCH_THREADS", "2")),
+        help="CPU inference thread cap (default 2 — reduces system freeze risk)",
+    )
     args = parser.parse_args()
+
+    _configure_cpu_threads(args.device, args.torch_threads)
 
     keys = [k.strip() for k in args.profiles.split(",") if k.strip()]
     out_dir = Path(args.output_dir)
@@ -214,6 +237,11 @@ def main() -> int:
             profile = get_vieneu_voice_profile(key)
             if profile is None:
                 print(f"[SKIP] unknown profile: {key}")
+                continue
+            try:
+                resolve_vieneu_voice_profile(key)
+            except (FileNotFoundError, ValueError) as exc:
+                print(f"[SKIP] {key}: {exc}")
                 continue
             out_path = out_dir / f"{key}.wav"
             print(f"[{idx}/{len(pending)}] synthesizing {key} ...")
