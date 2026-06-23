@@ -648,7 +648,7 @@ def list_translation_candidates(args: argparse.Namespace) -> list[dict[str, Any]
     if args.to_chapter:
         query += " AND c.chapter_number <= %(to_chapter)s"
         params["to_chapter"] = args.to_chapter
-    query += " ORDER BY s.title, c.chapter_number"
+    query += f" ORDER BY {repo.STORY_PRIORITY_ORDER_SQL}, c.chapter_number ASC"
     if args.limit > 0:
         query += " LIMIT %(limit)s"
         params["limit"] = args.limit

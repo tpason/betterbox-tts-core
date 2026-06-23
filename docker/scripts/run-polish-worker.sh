@@ -26,6 +26,7 @@ while true; do
     --vi-model "${POLISH_VI_MODEL:-qwen3:14b}" \
     --translate-model "${POLISH_TRANSLATE_MODEL:-qwen3:14b}" \
     --post-translate "${POLISH_POST_TRANSLATE:-polish}" \
+    --claim-order "${POLISH_CLAIM_ORDER:-non-vi-rank-tier}" \
     --char-map-text-source "${POLISH_CHAR_MAP_TEXT_SOURCE:-auto}" \
     --char-map-min-frequency "${POLISH_CHAR_MAP_MIN_FREQUENCY:-1}" \
     --char-map-create-cooldown "${POLISH_CHAR_MAP_CREATE_COOLDOWN:-30}"

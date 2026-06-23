@@ -161,6 +161,19 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
+def job_progress_label(job: dict) -> str:
+    payload = job.get("payload") or {}
+    chapter_number = payload.get("chapter_number")
+    chapter_text = f"ch{int(chapter_number):04d}" if chapter_number is not None else "ch????"
+    story_title = (
+        str(payload.get("source_story_title") or "").strip()
+        or str(payload.get("story_slug") or "").strip()
+        or str(job.get("story_id") or "unknown-story")
+    )
+    source = str(job.get("source_code") or "?")
+    return f"{story_title} | {chapter_text} | {source}"
+
+
 def choose_char_map_text_source(args: argparse.Namespace, raw_language: str) -> str:
     configured = str(getattr(args, "char_map_text_source", "auto") or "auto").strip().lower()
     if configured in {"raw", "translated", "polished"}:
@@ -418,13 +431,20 @@ def _run_lookahead_char_map(
         return  # already ahead enough
 
     from_ch = covered + 1
+    # ponytail: cap window — covered=0 at ch3418 must not scan ch1→ch3428 in one subprocess
+    scan_start = max(from_ch, target - lookahead + 1)
+    scan_end = target
+    if scan_start > scan_end:
+        return
+    from_ch = scan_start
     model = str(getattr(args, "char_map_model", "") or getattr(args, "vi_model", "qwen3:14b"))
     char_map_timeout = max(30, int(getattr(args, "char_map_timeout", 90) or 90))
-    n_new = target - from_ch + 1
+    n_new = scan_end - from_ch + 1
 
+    story_label = job_progress_label(job)
     log(
-        f"[CHAR_MAP LOOKAHEAD] ch{from_ch:04d}→ch{target:04d} "
-        f"(text_source={text_source}, {n_new} chaps) story_id={story_id}"
+        f"[CHAR_MAP LOOKAHEAD] {story_label} ch{from_ch:04d}→ch{scan_end:04d} "
+        f"(text_source={text_source}, {n_new} chaps)"
     )
     cmd = [
         sys.executable,
@@ -432,7 +452,7 @@ def _run_lookahead_char_map(
         "--story-id", story_id,
         "--text-source", text_source,
         "--from-chapter", str(from_ch),
-        "--to-chapter", str(target),
+        "--to-chapter", str(scan_end),
         "--sample-chapters", str(n_new),
         "--append-only",
         "--model", model,
@@ -450,8 +470,8 @@ def _run_lookahead_char_map(
             tail = (result.stderr or result.stdout or "").strip()[-500:]
             log(f"[CHAR_MAP LOOKAHEAD WARN] failed rc={result.returncode}: {tail}")
             return
-        repo.update_story_metadata(story_id, {coverage_key: target})
-        log(f"[CHAR_MAP LOOKAHEAD] done — {coverage_key}={target}")
+        repo.update_story_metadata(story_id, {coverage_key: scan_end})
+        log(f"[CHAR_MAP LOOKAHEAD] done — {story_label} {coverage_key}={scan_end}")
     except Exception as exc:
         log(f"[CHAR_MAP LOOKAHEAD WARN] {type(exc).__name__}: {exc}")
 
@@ -840,6 +860,14 @@ def _quality_check(
         source_language=source_language,
         log=lambda msg: log(f"{msg} ({label})"),
     )
+    if source_text:
+        try:
+            from term_alignment_check import check_term_alignment
+            for issue in check_term_alignment(source_text, text, genre=genre):
+                blocking.append(issue)
+                log(f"[QUALITY_FAIL] {label}: {issue}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"[QUALITY] term alignment error ({label}): {exc}")
     if blocking:
         log(f"[QUALITY_FAIL] {label}: {', '.join(blocking)}")
     if warnings:
@@ -1094,6 +1122,9 @@ def _resolve_input_for_polish(job: dict) -> tuple[Path, bool]:
 
 def process_job(job: dict, args: argparse.Namespace) -> None:
     payload = job.get("payload") or {}
+    repair_hints = str(payload.get("repair_hints") or "").strip()
+    if repair_hints:
+        args.chapter_repair_hints = repair_hints
     raw_language = (payload.get("raw_language") or "vi").lower()
     input_path, input_is_temp = _resolve_input_for_polish(job)
     raw_output_path = job.get("output_path") or ""
@@ -1467,6 +1498,7 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
             **({"single_pass": True} if args.single_pass and raw_language == "en" else {}),
         },
     )
+    repo.set_chapter_quality_status(job["chapter_id"], "pending_audit")
     polished_text_content = locals().get("polished_text_content") or ""
     if polished_text_content and story_id and current_chapter > 0:
         broadcast_chapter_update(story_id=story_id, chapter_number=current_chapter)
@@ -1479,15 +1511,15 @@ def process_job(job: dict, args: argparse.Namespace) -> None:
 
 
 def run_one(job: dict, args: argparse.Namespace) -> None:
+    label = job_progress_label(job)
     try:
         log(
-            "[START] "
-            f"job={job.get('id')} source={job.get('source_code')} chapter={job.get('chapter_id')} "
-            f"input={job.get('input_path')} output={job.get('output_path')}"
+            f"[START] {label} | job={job.get('id')} | "
+            f"raw_language={(job.get('payload') or {}).get('raw_language', 'vi')}"
         )
         process_job(job, args)
     except Exception as exc:
-        log(f"[ERROR] job={job.get('id')}: {exc}")
+        log(f"[ERROR] {label} | job={job.get('id')}: {exc}")
         repo.fail_story_job(job["id"], str(exc), retry_delay_seconds=args.retry_delay)
 
 
@@ -1509,6 +1541,16 @@ def main() -> None:
         action="append",
         default=[],
         help="Only claim jobs for this story id. Repeat for multiple stories.",
+    )
+    parser.add_argument(
+        "--claim-order",
+        choices=("fifo", "newest-story", "non-vi-first", "non-vi-rank-tier"),
+        default="non-vi-rank-tier",
+        help=(
+            "Job claim order: fifo=oldest job first; newest-story=newest stories first; "
+            "non-vi-first=EN/ZH/KO sources before VI-only polish; "
+            "non-vi-rank-tier=non-VI first, then rank tiers 1-3/4-6/… across sources (default)."
+        ),
     )
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--idle-sleep", type=float, default=3.0)
@@ -1742,9 +1784,15 @@ def main() -> None:
     batch_size = args.batch_size or args.workers
     source_label = ",".join(args.source_code) if args.source_code else "all"
     story_label = ",".join(args.story_id) if args.story_id else "all"
+    claim_order = {
+        "fifo": "fifo",
+        "newest-story": "newest_story",
+        "non-vi-first": "non_vi_first",
+        "non-vi-rank-tier": "non_vi_rank_tier",
+    }[args.claim_order]
     log(
         f"worker={args.worker_id}, workers={args.workers}, batch_size={batch_size}, "
-        f"source={source_label}, story={story_label}"
+        f"source={source_label}, story={story_label}, claim_order={args.claim_order}"
     )
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -1764,11 +1812,14 @@ def main() -> None:
                     limit=claim_limit,
                     source_codes=args.source_code,
                     story_ids=args.story_id,
+                    claim_order=claim_order,
                 )
                 if args.once:
                     claimed_once = True
                 if jobs:
                     log(f"[CLAIM] count={len(jobs)} worker={args.worker_id}")
+                    for job in jobs:
+                        log(f"[CLAIM] next → {job_progress_label(job)}")
                 for job in jobs:
                     future = executor.submit(run_one, job, args)
                     in_flight[future] = str(job.get("id"))

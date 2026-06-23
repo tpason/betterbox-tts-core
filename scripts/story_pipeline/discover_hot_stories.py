@@ -27,6 +27,7 @@ from scripts.story_pipeline.crawl_qidian_rankings import (  # noqa: E402
     DEFAULT_RANK_URLS as QIDIAN_RANK_URLS,
     parse_rank_page,
 )
+from story_db.story_pipeline_db.repository import story_priority_sort_key  # noqa: E402
 
 
 SOURCES = {
@@ -2025,7 +2026,12 @@ def main() -> None:
         require_include=not args.no_require_include,
         min_chapters=args.min_chapters,
     )
-    accepted.sort(key=lambda item: (item.source_code, item.rank_position or 999999))
+    accepted.sort(
+        key=lambda item: story_priority_sort_key(
+            source_code=item.source_code,
+            rank_position=item.rank_position,
+        )
+    )
     accepted = cap_by_source(accepted, args.limit_per_source)
 
     raw_by_source: dict[str, int] = {}

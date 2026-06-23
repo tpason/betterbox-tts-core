@@ -195,7 +195,7 @@ services:
     environment:
       <<: *pipeline-env
       DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-86400}
-      DISCOVERY_SOURCES: ${DISCOVERY_SOURCES:-truyenfull_today royalroad}
+      DISCOVERY_SOURCES: ${DISCOVERY_SOURCES:-royalroad truyenfull_today}
       DISCOVERY_PAGES: ${DISCOVERY_PAGES:-2}
       DISCOVERY_MIN_CHAPTERS: ${DISCOVERY_MIN_CHAPTERS:-30}
     extra_hosts: *host-gateway

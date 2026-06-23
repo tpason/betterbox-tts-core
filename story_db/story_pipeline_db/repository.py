@@ -8,6 +8,94 @@ from psycopg.types.json import Jsonb
 
 from .db import connect
 
+# Sources whose default raw language is not Vietnamese (translate+polish path).
+NON_VI_SOURCE_CODES = (
+    "qidian",
+    "royalroad",
+    "novelbin",
+    "freewebnovel",
+    "lightnovelpub",
+    "skydemonorder",
+    "wetriedtls",
+    "fanmtl",
+    "novelfire",
+    "novelhub",
+    "naver_series",
+    "jadescrolls",
+)
+NON_VI_RAW_LANGUAGE_CODES = ("en", "zh", "ko", "ja", "zh-cn", "zh-tw")
+
+_non_vi_sources_sql = ", ".join(f"'{code}'" for code in NON_VI_SOURCE_CODES)
+_non_vi_langs_sql = ", ".join(f"'{code}'" for code in NON_VI_RAW_LANGUAGE_CODES)
+
+# Rank tiers: 1-3, 4-6, 7-9, … so top-ranked stories finish before lower tiers.
+RANK_TIER_SIZE = 3
+
+_NON_VI_PRIORITY_CASE = f"""
+CASE
+  WHEN j.source_code IN ({_non_vi_sources_sql}) THEN 0
+  WHEN lower(COALESCE(j.payload->>'raw_language', s.language, '')) IN ({_non_vi_langs_sql}) THEN 0
+  ELSE 1
+END
+""".strip()
+
+_NON_VI_STORY_PRIORITY_CASE = f"""
+CASE
+  WHEN src.code IN ({_non_vi_sources_sql}) THEN 0
+  WHEN lower(COALESCE(s.language, '')) IN ({_non_vi_langs_sql}) THEN 0
+  ELSE 1
+END
+""".strip()
+
+_RANK_TIER_CASE = f"""
+CASE
+  WHEN s.rank_position IS NULL OR s.rank_position < 1 THEN 2147483647
+  ELSE (s.rank_position - 1) / {RANK_TIER_SIZE}
+END
+""".strip()
+
+_CHAPTER_ORDER_CASE = """
+COALESCE(
+  c.chapter_number,
+  NULLIF((j.payload->>'chapter_number')::int, 0),
+  2147483647
+)
+""".strip()
+
+STORY_PRIORITY_ORDER_SQL = f"""
+{_NON_VI_STORY_PRIORITY_CASE} ASC,
+{_RANK_TIER_CASE} ASC,
+s.rank_position ASC NULLS LAST,
+src.code ASC,
+s.updated_at DESC,
+s.created_at DESC
+""".strip()
+
+
+def rank_tier(position: int | None, *, tier_size: int = RANK_TIER_SIZE) -> int:
+    if position is None or position < 1:
+        return 2_147_483_647
+    return (int(position) - 1) // max(1, tier_size)
+
+
+def is_non_vi_story(*, source_code: str, language: str | None = None) -> bool:
+    if source_code in NON_VI_SOURCE_CODES:
+        return True
+    lang = (language or "").strip().lower()
+    return lang in NON_VI_RAW_LANGUAGE_CODES
+
+
+def story_priority_sort_key(
+    *,
+    source_code: str,
+    rank_position: int | None,
+    language: str | None = None,
+) -> tuple[int, int, int, str]:
+    """Python mirror of STORY_PRIORITY_ORDER_SQL for in-memory sorts."""
+    non_vi = 0 if is_non_vi_story(source_code=source_code, language=language) else 1
+    rank = int(rank_position) if rank_position and rank_position > 0 else 2_147_483_647
+    return (non_vi, rank_tier(rank_position), rank, source_code)
+
 
 def slugify_category(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value.strip().lower())
@@ -811,6 +899,22 @@ def enqueue_chapter_job(
         return dict(row)
 
 
+_CLAIM_ORDER_SQL = {
+    "fifo": "j.priority, j.created_at ASC",
+    "newest_story": "j.priority, s.created_at DESC NULLS LAST, j.created_at ASC",
+    "non_vi_first": (
+        f"j.priority, {_NON_VI_PRIORITY_CASE} ASC, s.created_at DESC NULLS LAST, j.created_at ASC"
+    ),
+    # Non-VI sources first; within each rank tier (1-3, 4-6, …) prefer lower rank_position,
+    # then round-robin across sources at the same rank, then chapter order.
+    "non_vi_rank_tier": (
+        f"j.priority, {_NON_VI_PRIORITY_CASE} ASC, {_RANK_TIER_CASE} ASC, "
+        f"s.rank_position ASC NULLS LAST, j.source_code ASC, "
+        f"{_CHAPTER_ORDER_CASE} ASC, j.created_at ASC"
+    ),
+}
+
+
 def claim_story_jobs(
     job_type: str,
     worker_id: str,
@@ -818,24 +922,28 @@ def claim_story_jobs(
     *,
     source_codes: Sequence[str] | None = None,
     story_ids: Sequence[str] | None = None,
+    claim_order: str = "fifo",
 ) -> list[dict[str, Any]]:
     source_codes = [code for code in (source_codes or []) if code]
     story_ids = [story_id for story_id in (story_ids or []) if story_id]
+    order_sql = _CLAIM_ORDER_SQL.get(claim_order, _CLAIM_ORDER_SQL["fifo"])
     with connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             WITH selected AS (
-                SELECT id
-                FROM story_jobs
-                WHERE job_type = %s
-                  AND status = 'pending'
-                  AND run_after <= now()
-                  AND attempts < max_attempts
-                  AND (%s::text[] IS NULL OR source_code = ANY(%s::text[]))
-                  AND (%s::uuid[] IS NULL OR story_id = ANY(%s::uuid[]))
-                ORDER BY priority, created_at
+                SELECT j.id
+                FROM story_jobs j
+                LEFT JOIN stories s ON s.id = j.story_id
+                LEFT JOIN chapters c ON c.id = j.chapter_id
+                WHERE j.job_type = %s
+                  AND j.status = 'pending'
+                  AND j.run_after <= now()
+                  AND j.attempts < j.max_attempts
+                  AND (%s::text[] IS NULL OR j.source_code = ANY(%s::text[]))
+                  AND (%s::uuid[] IS NULL OR j.story_id = ANY(%s::uuid[]))
+                ORDER BY {order_sql}
                 LIMIT %s
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF j SKIP LOCKED
             )
             UPDATE story_jobs j
             SET status = 'running',
@@ -1211,7 +1319,7 @@ def list_active_stories(
                 OR (s.metadata->>'alternate_skip_until')::timestamptz <= now()
           )
         """
-    query += " ORDER BY s.rank_position NULLS LAST, s.updated_at DESC, s.created_at DESC"
+    query += f" ORDER BY {STORY_PRIORITY_ORDER_SQL}"
     if limit > 0:
         query += " LIMIT %s"
         params.append(limit)
@@ -1251,13 +1359,11 @@ def list_stories_needing_alternate_source(
                 OR (s.metadata->>'alternate_skip_until')::timestamptz <= now()
           )
         """
-    query += """
+    query += f"""
         ORDER BY
             (s.metadata->>'needs_alternate_source')::boolean DESC NULLS LAST,
             (s.metadata->>'source_host_unavailable_at')::timestamptz NULLS LAST,
-            s.rank_position NULLS LAST,
-            s.updated_at DESC,
-            s.created_at DESC
+            {STORY_PRIORITY_ORDER_SQL}
     """
     if limit > 0:
         query += " LIMIT %s"
@@ -1305,7 +1411,7 @@ def claim_active_stories(
                     OR (s.metadata->>'last_crawl_finished_at')::timestamptz <= now() - make_interval(mins => %s)
               )
               AND (s.metadata->>'source_host_unavailable' IS NULL OR s.metadata->>'source_host_unavailable' = 'false')
-            ORDER BY s.rank_position NULLS LAST, s.updated_at DESC, s.created_at DESC
+            ORDER BY {STORY_PRIORITY_ORDER_SQL}
             LIMIT %s
             FOR UPDATE SKIP LOCKED
         )
@@ -1801,3 +1907,231 @@ def request_chapter_recrawl(
     if touch_story_catalog:
         request_story_recrawl(story_id)
     return len(rows)
+
+
+def set_chapter_quality_status(chapter_id: str, status: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE chapters
+            SET quality_status = %(status)s, updated_at = now()
+            WHERE id = %(chapter_id)s::uuid
+            """,
+            {"chapter_id": chapter_id, "status": status},
+        )
+
+
+def update_chapter_quality_audit(
+    chapter_id: str,
+    *,
+    status: str,
+    audit_version: int,
+    issues: list[dict[str, Any]],
+    blocking_count: int = 0,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE chapters
+            SET quality_status = %(status)s,
+                quality_audit_version = %(audit_version)s,
+                quality_checked_at = now(),
+                quality_issues = %(issues)s::jsonb,
+                updated_at = now()
+            WHERE id = %(chapter_id)s::uuid
+            """,
+            {
+                "chapter_id": chapter_id,
+                "status": status,
+                "audit_version": audit_version,
+                "issues": Jsonb(issues),
+            },
+        )
+
+
+def request_quality_repair(
+    chapter_id: str,
+    action: str,
+    *,
+    repair_hints: str = "",
+    dry_run: bool = False,
+    force_running: bool = False,
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """Atomic repolish/retranslate enqueue — resets done polish_chapter jobs."""
+    action = (action or "repolish").strip().lower()
+    if action not in {"repolish", "retranslate"}:
+        raise ValueError(f"unknown repair action: {action}")
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                c.id, c.chapter_number, c.story_id, c.title AS chapter_title,
+                c.raw_text_path, c.raw_language, c.quality_repair_attempts,
+                s.title AS story_title, src.code AS source_code
+            FROM chapters c
+            JOIN stories s ON s.id = c.story_id
+            JOIN sources src ON src.id = s.source_id
+            WHERE c.id = %(chapter_id)s::uuid
+            """,
+            {"chapter_id": chapter_id},
+        ).fetchone()
+        if row is None:
+            return {"ok": False, "error": "chapter_not_found"}
+        attempts = int(row["quality_repair_attempts"] or 0)
+        if attempts >= max_attempts:
+            if not dry_run:
+                conn.execute(
+                    """
+                    UPDATE chapters
+                    SET quality_status = 'failed_manual', updated_at = now()
+                    WHERE id = %(chapter_id)s::uuid
+                    """,
+                    {"chapter_id": chapter_id},
+                )
+            return {
+                "ok": False,
+                "error": "max_repair_attempts",
+                "attempts": attempts,
+                "chapter_number": row["chapter_number"],
+            }
+
+        if dry_run:
+            return {
+                "ok": True,
+                "dry_run": True,
+                "action": action,
+                "chapter_number": row["chapter_number"],
+                "attempts": attempts + 1,
+            }
+
+        repair_payload = {
+            "quality_repair": True,
+            "repair_action": action,
+            "repair_hints": repair_hints,
+        }
+
+        if action == "retranslate":
+            conn.execute(
+                """
+                UPDATE chapters
+                SET is_translated = FALSE,
+                    is_polished = FALSE,
+                    translated_text_content = NULL,
+                    polished_text_content = NULL,
+                    quality_status = 'failed',
+                    quality_last_action = 'retranslate',
+                    quality_repair_attempts = quality_repair_attempts + 1,
+                    updated_at = now()
+                WHERE id = %(chapter_id)s::uuid
+                """,
+                {"chapter_id": chapter_id},
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE chapters
+                SET is_polished = FALSE,
+                    quality_status = 'failed',
+                    quality_last_action = 'repolish',
+                    quality_repair_attempts = quality_repair_attempts + 1,
+                    updated_at = now()
+                WHERE id = %(chapter_id)s::uuid
+                """,
+                {"chapter_id": chapter_id},
+            )
+
+        status_filter = "" if force_running else "AND status NOT IN ('running')"
+        updated = conn.execute(
+            f"""
+            UPDATE story_jobs
+            SET status = 'pending',
+                attempts = 0,
+                run_after = now(),
+                locked_by = NULL,
+                locked_at = NULL,
+                last_error = NULL,
+                payload = COALESCE(payload, '{{}}'::jsonb) || %(repair_payload)s::jsonb,
+                updated_at = now()
+            WHERE job_type = 'polish_chapter'
+              AND chapter_id = %(chapter_id)s::uuid
+              {status_filter}
+            RETURNING id
+            """,
+            {"chapter_id": chapter_id, "repair_payload": Jsonb(repair_payload)},
+        ).fetchall()
+
+        if not updated:
+            from genre_prompts import find_char_map_file, resolve_genre_from_context
+
+            raw_text_path = row["raw_text_path"] or ""
+            slug = ""
+            if raw_text_path:
+                from pathlib import Path
+
+                slug = Path(raw_text_path).parent.name
+            chapter_num = int(row["chapter_number"] or 0)
+            raw_language = row["raw_language"] or "en"
+            story_id = str(row["story_id"])
+            source_code = row["source_code"] or ""
+            char_map_file = find_char_map_file(story_id=story_id, slug=slug)
+            genre = resolve_genre_from_context(
+                "",
+                raw_language=raw_language,
+                source_code=source_code,
+                char_map_file=char_map_file,
+            )
+            chapter_stem = f"chapter{chapter_num:04d}"
+            if raw_text_path:
+                from pathlib import Path
+
+                chapter_stem = Path(raw_text_path).stem
+            payload = {
+                "raw_language": raw_language,
+                "story_slug": slug,
+                "chapter_number": chapter_num,
+                "chapter_title": row["chapter_title"] or chapter_stem,
+                "post_translate": "polish",
+                "genre": genre,
+                "char_map_file": char_map_file,
+                **repair_payload,
+            }
+            conn.execute(
+                """
+                INSERT INTO story_jobs (
+                    job_type, chapter_id, story_id, source_code, model,
+                    input_path, output_path, payload, priority, max_attempts, status
+                )
+                VALUES (
+                    'polish_chapter', %(chapter_id)s::uuid, %(story_id)s::uuid,
+                    %(source_code)s, 'qwen3:14b', %(input_path)s, %(output_path)s,
+                    %(payload)s::jsonb, 50, 3, 'pending'
+                )
+                ON CONFLICT (job_type, chapter_id)
+                DO UPDATE SET
+                    status = 'pending',
+                    attempts = 0,
+                    run_after = now(),
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    last_error = NULL,
+                    payload = COALESCE(story_jobs.payload, '{}'::jsonb) || EXCLUDED.payload,
+                    updated_at = now()
+                """,
+                {
+                    "chapter_id": chapter_id,
+                    "story_id": story_id,
+                    "source_code": source_code,
+                    "input_path": raw_text_path or None,
+                    "output_path": None,
+                    "payload": Jsonb(payload),
+                },
+            )
+
+    return {
+        "ok": True,
+        "action": action,
+        "chapter_number": row["chapter_number"],
+        "attempts": attempts + 1,
+    }
